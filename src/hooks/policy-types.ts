@@ -80,11 +80,44 @@ export interface LlmConfig {
   model?: string;
 }
 
+/**
+ * The collector's non-secret settings. The ingest credential deliberately does
+ * NOT live here: this file is written with a bare `writeFileSync`, so it
+ * inherits the umask and lands at 0664 inside a 0775 `~/.failproofai/` — an API
+ * key here would be readable by every local user. It lives in
+ * `~/.failproofai/ingest.json` at 0600 instead.
+ *
+ * Read by the Rust daemon (`crates/fpai-collect/src/config.rs`); the field
+ * names must stay in step with the `Settings` struct there.
+ */
+export interface CollectorConfig {
+  /**
+   * Ship agent session transcripts. Defaults to false and is a SEPARATE opt-in
+   * from configuring a key, because transcripts carry prompts, file contents
+   * and whatever was pasted into a terminal.
+   */
+  sessions?: boolean;
+  /** Ship hook activity. Carries decisions and tool names, never file contents. */
+  hooks?: boolean;
+  /** `decisions` keeps every deny/instruct exact and aggregates the ~99% allows. */
+  hooksVerbosity?: "all" | "decisions" | "off";
+  redact?: "minimal" | "off";
+  /** Label stamped on every event. Must not contain a comma — ingest skips those lines. */
+  environment?: string;
+}
+
 export interface HooksConfig {
   enabledPolicies: string[];
+  /** Collector settings; see {@link CollectorConfig}. Absent means unconfigured. */
+  collector?: CollectorConfig;
   llm?: LlmConfig;
   policyParams?: Record<string, Record<string, unknown>>;
+  /** Explicit custom policy files, loaded in array order. */
+  customPoliciesPaths?: string[];
+  /** @deprecated Use customPoliciesPaths. Kept for existing config files. */
   customPoliciesPath?: string;
+  /** Source-qualified custom policy IDs that should not be registered. */
+  disabledCustomPolicies?: string[];
   /**
    * Turn off convention-discovered custom policies (`.failproofai/policies/`)
    * without deleting or renaming the files. Absent means enabled — the default
@@ -93,4 +126,45 @@ export interface HooksConfig {
    * Only ever written explicitly as `false`.
    */
   customPoliciesEnabled?: boolean;
+  /**
+   * Record of the convention policies (`.failproofai/policies/*policies.mjs`)
+   * discovered at this scope the last time a failproofai command ran.
+   *
+   * DESCRIPTIVE, NEVER AUTHORITATIVE. Enforcement always discovers from the
+   * filesystem (`loadAllCustomHooks`) and never reads this key — a policy file
+   * dropped in enforces on the very next tool call whether or not this list has
+   * caught up. Making the loader trust it would mean a freshly-copied policy
+   * silently doing nothing until some command refreshed the config, which is
+   * the exact silent-non-enforcement failure this project exists to remove.
+   *
+   * Refreshed wholesale (not merged) by `failproofai policies` and the setup
+   * wizard, so a deleted file disappears from the record on the next run. It is
+   * deliberately NOT written from the hook path: that runs on every tool call,
+   * and a read-modify-write from concurrent short-lived hook processes with no
+   * locking would corrupt the file that governs enforcement.
+   */
+  conventionPolicies?: ConventionPolicyRecord[];
+  /**
+   * `true` once `failproofai config` has installed and started the
+   * failproofaid background daemon for this machine. Global scope ONLY —
+   * whether *this specific machine* has a running daemon is not something a
+   * committed project config should be able to assert on a teammate's
+   * behalf, so `readMergedHooksConfig` does not merge this key across
+   * scopes the way `enabledPolicies` merges. See `daemon-client.ts`.
+   *
+   * Governs the fail-closed/in-process split entirely: unset (or `false`)
+   * means this machine has never been daemon-configured, so hooks run the
+   * same full in-process evaluation they always have, with no socket
+   * attempt at all. Once `true`, an unreachable daemon fails closed instead
+   * of silently falling back — see the plan's "Confirmed scope decisions".
+   */
+  daemonConfigured?: boolean;
+}
+
+/** One convention policy file and the hooks it registered, as last observed. */
+export interface ConventionPolicyRecord {
+  /** Basename, e.g. `hermes-guardrails.policies.mjs`. */
+  file: string;
+  /** Hook names the file registered, or `[]` if it failed to load. */
+  hooks: string[];
 }

@@ -15,10 +15,11 @@ import {
   runHook,
   assertAllow,
   assertPreToolUseDeny,
-  assertPostToolUseDeny,
+  assertPostToolUseBlockDecision,
   assertCopilotStopBlock,
 } from "../helpers/hook-runner";
 import { CopilotPayloads } from "../helpers/payloads";
+import { hookActivityDir } from "../../../src/hooks/fp-home";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const BINARY_PATH = resolve(REPO_ROOT, "bin/failproofai.mjs");
@@ -92,7 +93,7 @@ describe("E2E: Copilot integration — hook protocol", () => {
     }
   });
 
-  it("PostToolUse: deny emits additionalContext (Claude-compatible JSON shape)", () => {
+  it("PostToolUse: deny emits a top-level {decision:\"block\"}, not additionalContext", () => {
     const env = createCopilotEnv();
     try {
       writeConfig(env.cwd, ["sanitize-jwt"]);
@@ -115,7 +116,7 @@ describe("E2E: Copilot integration — hook protocol", () => {
         ),
         { homeDir: env.home, cli: "copilot" },
       );
-      assertPostToolUseDeny(result);
+      assertPostToolUseBlockDecision(result);
     } finally {
       env.cleanup();
     }
@@ -145,7 +146,7 @@ describe("E2E: Copilot integration — hook protocol", () => {
         CopilotPayloads.preToolUse.bash("sudo cat /etc/passwd", env.cwd),
         { homeDir: env.home, cli: "copilot" },
       );
-      const activityPath = resolve(env.home, ".failproofai", "cache", "hook-activity", "current.jsonl");
+      const activityPath = resolve(hookActivityDir(env.home), "current.jsonl");
       expect(existsSync(activityPath)).toBe(true);
       const lines = readFileSync(activityPath, "utf-8").trim().split("\n").filter(Boolean);
       const last = JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;

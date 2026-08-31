@@ -1,31 +1,30 @@
 ---
----
-title: معالج Hook (داخلي)
-description: "العملية الفرعية التي يستدعيها Claude Code عند كل حدث أداة"
+title: Hook handler (internal)
+description: "תת-תהליך שClaude Code קוראה בכל אירוע כלי"
 ---
 
 ```bash
 failproofai --hook <EventType>
 ```
 
-هذا هو الأمر المسجل في `settings.json` الخاص بـ Claude Code بواسطة `failproofai policies --install`. لا تستدعيه عادة مباشرة.
+זה הפקודה שנרשמת ב-`settings.json` של Claude Code על ידי `failproofai policies --install`. בדרך כלל אתה לא קורא לזה ישירות.
 
-يقرأ حمولة JSON من stdin، ويقيّم جميع السياسات المفعّلة، ويخرج برمز يشير إلى القرار:
+קוראה JSON payload מ-stdin, מעריכה את כל הפוליסיות המופעלות, ויוצאת עם קוד המציין את ההחלטה:
 
-| رمز الخروج | القرار | التأثير |
-|-----------|---------|--------|
-| `0` | `allow` | السماح بالإجراء |
-| `1` | `deny` | حظر الإجراء - يرى Claude سبب الحظر |
-| `2` | `instruct` | حقن التوجيهات في سياق Claude |
+| קוד יציאה | החלטה | השפעה |
+|-----------|--------|--------|
+| `0` | `allow` | אפשר את הפעולה |
+| `1` | `deny` | חסום את הפעולה - Claude יראה את סיבת הדחייה |
+| `2` | `instruct` | הזרק הנחיות להקשר של Claude |
 
-### أنواع الأحداث المدعومة
+### סוגי אירועים נתמכים
 
-| الفئة | الأحداث |
-|-------|---------|
-| **تنفيذ الأداة** | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `PermissionDenied` |
-| **دورة حياة الجلسة** | `SessionStart`, `SessionEnd`, `Stop`, `StopFailure` |
-| **تفاعل المستخدم** | `UserPromptSubmit`, `Notification`, `Elicitation`, `ElicitationResult` |
-| **الوكلاء الفرعيون والمهام** | `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `TeammateIdle` |
-| **التكوين** | `InstructionsLoaded`, `ConfigChange`, `CwdChanged` |
-| **نظام الملفات** | `FileChanged`, `WorktreeCreate`, `WorktreeRemove` |
-| **السياق** | `PreCompact`, `PostCompact` |
+| קטגוריה | אירועים |
+|----------|--------|
+| **ביצוע כלים** | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PermissionRequest`, `PermissionDenied` |
+| **מחזור חיי הסשן** | `SessionStart`, `SessionEnd`, `Stop`, `StopFailure` |
+| **אינטראקציה עם המשתמש** | `UserPromptSubmit`, `Notification`, `Elicitation`, `ElicitationResult` |
+| **תת-אגנטים ומשימות** | `SubagentStart`, `SubagentStop`, `TaskCreated`, `TaskCompleted`, `TeammateIdle` |
+| **תצורה** | `InstructionsLoaded`, `ConfigChange`, `CwdChanged` |
+| **מערכת קבצים** | `FileChanged`, `WorktreeCreate`, `WorktreeRemove` |
+| **הקשר** | `PreCompact`, `PostCompact` |

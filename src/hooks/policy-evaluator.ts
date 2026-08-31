@@ -179,6 +179,21 @@ export async function evaluatePolicies(
             decision: "deny",
           };
         }
+        // `beforeSubmitPrompt` does NOT read `permission`. Its only block key
+        // is `continue: false` (+ an optional `user_message` shown to the
+        // user); an object carrying unknown keys validates and is dropped, so
+        // the flat deny below was inert and every prompt went through. Verified
+        // against cursor-agent 2026.07.16-899851b, 1931.index.js char 887883.
+        if (eventType === "UserPromptSubmit") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({ continue: false, user_message: blockedMessage }),
+            stderr: "",
+            policyName: policy.name,
+            reason,
+            decision: "deny",
+          };
+        }
         const response = {
           permission: "deny",
           user_message: blockedMessage,
@@ -229,13 +244,15 @@ export async function evaluatePolicies(
       }
 
       // Hermes: the block contract is `{"decision":"block","reason"}` on stdout;
-      // Hermes IGNORES exit codes, so the JSON is the only channel. This one
-      // return covers every Hermes event we install (PreToolUse / PostToolUse /
-      // SubagentStop) — there is no Stop/turn-end event to special-case (Hermes
-      // has no turn boundary; the 5 require-*-before-stop builtins never fire for
-      // it — see CLAUDE.md / the audit plan). A block on PreToolUse stops the
-      // tool before it runs, regardless of the originating platform
-      // (slack/telegram/cli/cron) or subagent.
+      // Hermes IGNORES exit codes, so the JSON is the only channel. A block on
+      // PreToolUse stops the tool before it runs, regardless of the originating
+      // platform (slack/telegram/cli/cron) or subagent.
+      //
+      // Only `pre_tool_call` and `pre_verify` are gated in upstream's
+      // `_parse_response` (agent/shell_hooks.py:567-621); the shape is still
+      // emitted for the other installed events, where it is read by nothing.
+      // We do not install `pre_verify` (see the note in types.ts), so Hermes
+      // has no canonical Stop event and no Stop branch is needed here.
       if (session?.cli === "hermes") {
         return {
           exitCode: 0,
@@ -422,6 +439,41 @@ export async function evaluatePolicies(
         };
       }
 
+      // Copilot reads two shapes we were not sending, so a deny on either of
+      // these events was emitted, logged, counted as enforcement — and ignored.
+      // Both verified against the shipped @github/copilot-linux-x64 bundle.
+      // Note exit 2 is NEVER a deny channel on copilot for any event; it is
+      // logged as `Hook command exited with code 2 (warning)`.
+      if (session?.cli === "copilot") {
+        // `userPromptSubmit` gates the turn, but only on {decision:"block"} at
+        // exit 0 (consumer app.js@2823018). We were emitting exit 2 + stderr,
+        // which copilot warns about and then submits the prompt anyway.
+        if (eventType === "UserPromptSubmit") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({ decision: "block", reason: blockedMessage }),
+            stderr: "",
+            policyName: policy.name,
+            reason,
+            decision: "deny",
+          };
+        }
+        // Copilot consumes a FLAT {behavior, message} here (normalizer
+        // CMn@179042 -> mapper h4t@2686538). The Codex-shaped nested
+        // hookSpecificOutput.decision below normalizes to `{}` on copilot, so
+        // the permission prompt proceeded as if no policy existed.
+        if (eventType === "PermissionRequest") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({ behavior: "deny", message: blockedMessage }),
+            stderr: "",
+            policyName: policy.name,
+            reason,
+            decision: "deny",
+          };
+        }
+      }
+
       if (eventType === "PermissionRequest") {
         // Codex-only: hookSpecificOutput.decision.behavior = "allow" | "deny"
         // (per https://developers.openai.com/codex/hooks#permissionrequest).
@@ -445,6 +497,43 @@ export async function evaluatePolicies(
       }
 
       if (eventType === "PostToolUse") {
+        // codex and copilot both gate PostToolUse on a TOP-LEVEL
+        // {decision:"block", reason:<string>}. Neither reads the
+        // hookSpecificOutput shape below, so every PostToolUse deny on them was
+        // emitted, logged, counted as enforcement — and dropped on the floor.
+        //
+        // codex 0.147.0, live A/B probe (same prompt, same hook, only the shape
+        // differs): with {decision:"block"} the run prints `hook: PostToolUse
+        // Blocked`, routes the reason through codex_core::tools::router, and the
+        // reason REPLACES the tool result — the model never sees the real
+        // output. With hookSpecificOutput it prints `hook: PostToolUse
+        // Completed` and the model reads the output verbatim. NOTE the codex
+        // rows elsewhere cite output_parser.rs / hook_runtime.rs / tools
+        // registry.rs line numbers that no longer exist in 0.147.0 (its hook
+        // sources are hooks/src/{engine,events}/…); this row is re-grounded on
+        // the live probe rather than those paths.
+        //
+        // copilot 1.0.78: BOTH postToolUse call sites in the shipped
+        // @github/copilot-linux-x64 app.js gate on
+        //   vK = t => t?.decision === "block" && typeof t.reason === "string"
+        // -> "Tool result blocked". vK fails closed on a missing or non-string
+        // reason, so the reason must always be a non-empty string — do not
+        // "simplify" this to {decision:"block"} alone.
+        //
+        // The tool has already RUN in both cases. This replaces the result the
+        // model reads; it does not undo the side effect. That is the only
+        // semantic available at PostToolUse, and it is precisely what an
+        // output-scrubbing policy needs to keep a secret out of the context.
+        if (session?.cli === "codex" || session?.cli === "copilot") {
+          return {
+            exitCode: 0,
+            stdout: JSON.stringify({ decision: "block", reason: blockedMessage }),
+            stderr: "",
+            policyName: policy.name,
+            reason,
+            decision: "deny",
+          };
+        }
         const response = {
           hookSpecificOutput: {
             hookEventName: eventType,

@@ -1,14 +1,18 @@
 "use server";
 
-import { readHooksConfig } from "@/src/hooks/hooks-config";
+import { configuredCustomPolicyPaths, readMergedHooksConfig } from "@/src/hooks/hooks-config";
 import { hooksInstalledInSettings, getSettingsPath } from "@/src/hooks/manager";
 import { BUILTIN_POLICIES } from "@/src/hooks/builtin-policies";
 import { listIntegrations } from "@/src/hooks/integrations";
 import { HOOK_SCOPES } from "@/src/hooks/types";
 import type { HookScope, IntegrationType } from "@/src/hooks/types";
 import { getCliLabel } from "@/lib/cli-registry";
+import { customPolicyId, conventionPolicyId, discoverPolicyFiles } from "@/src/hooks/custom-hooks-loader";
+import { findProjectConfigDir } from "@/src/hooks/hooks-config";
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { basename, resolve } from "node:path";
+import { customPoliciesDir } from "@/src/hooks/fp-home";
 
 export interface PolicyParamSpec {
   type: string;
@@ -32,6 +36,27 @@ export interface CustomPolicyInfo {
   name: string;
   description?: string;
   eventScope?: string;
+  id: string;
+  enabled: boolean;
+}
+
+/**
+ * One convention-discovered policy file (`.failproofai/policies/*policies.mjs`)
+ * and the policies it declares.
+ *
+ * These are registered by the filesystem, never by `policies-config.json` — the
+ * whole point of the convention is that dropping a file in works with no config
+ * at all. So the dashboard has to discover them the same way the hook path and
+ * `failproofai policies --list` do; reading config alone renders nothing and
+ * makes a working policy look absent.
+ */
+export interface ConventionPolicyFile {
+  scope: "project" | "user";
+  /** Basename, e.g. `security-policies.mjs`. */
+  file: string;
+  /** Absolute path, shown so the user knows which file to edit. */
+  path: string;
+  policies: CustomPolicyInfo[];
 }
 
 export interface CliInstallStatus {
@@ -52,8 +77,76 @@ export interface HooksConfigPayload {
   /** Per-CLI install state at user scope, in `INTEGRATION_TYPES` order. */
   clis: CliInstallStatus[];
   policies: PolicyInfo[];
+  customPoliciesPaths?: string[];
+  /** Legacy singular path retained for older dashboard clients. */
   customPoliciesPath?: string;
   customPolicies?: CustomPolicyInfo[];
+  /** Convention-discovered policy files, project scope first. */
+  conventionPolicies: ConventionPolicyFile[];
+}
+
+/**
+ * Discover `.failproofai/policies/*policies.{js,mjs,ts}` at project and user
+ * scope and statically parse each one.
+ *
+ * Deliberately parsed, never imported: `manager.ts` executes these files to
+ * list them, which is fine for a one-shot CLI but would run arbitrary user code
+ * inside the long-lived dashboard server on every page load.
+ * `parseCustomPoliciesFromFile` is a regex read, so a malformed policy file
+ * degrades to "no policies listed" instead of taking the server down.
+ */
+async function discoverConventionPolicies(
+  disabled: Set<string>,
+  explicitPaths: Set<string>,
+): Promise<ConventionPolicyFile[]> {
+  // Two corrections over a bare `process.cwd()`, both of which made real
+  // project policies invisible here while enforcement loaded them fine:
+  //   - the standalone server chdir()s into the package on startup, so the real
+  //     launch directory arrives via FAILPROOFAI_LAUNCH_CWD (scripts/launch.ts);
+  //   - enforcement resolves the project root by walking UP to the nearest
+  //     `.failproofai` marker (custom-hooks-loader -> findProjectConfigDir), so
+  //     resolving at the exact cwd disagrees with it from any subdirectory.
+  const launchCwd = process.env.FAILPROOFAI_LAUNCH_CWD || process.cwd();
+  const projectDir = resolve(findProjectConfigDir(launchCwd), ".failproofai", "policies");
+  const userDir = customPoliciesDir();
+
+  const dirs: { scope: "project" | "user"; dir: string }[] = [
+    { scope: "project", dir: projectDir },
+    // Running the dashboard from $HOME makes both paths identical; listing the
+    // same file twice would read as two separate installs.
+    ...(userDir === projectDir ? [] : [{ scope: "user" as const, dir: userDir }]),
+  ];
+
+  const out: ConventionPolicyFile[] = [];
+  for (const { scope, dir } of dirs) {
+    // Isolate per directory and per file. `parseCustomPoliciesFromFile` guards
+    // non-existence but `readFile` still throws on EACCES, a file deleted
+    // between listing and reading, or a directory entry — and that rejection
+    // propagates out of the action, where both callers swallow it, leaving the
+    // Configure Policies tab stuck on "Loading…" with no error. One unreadable
+    // file must cost that file's policy list, not the whole page.
+    let files: string[] = [];
+    try {
+      files = discoverPolicyFiles(dir);
+    } catch {
+      continue;
+    }
+    for (const filePath of files) {
+      if (explicitPaths.has(filePath)) continue;
+      let policies: CustomPolicyInfo[] = [];
+      try {
+        policies = (await parseCustomPoliciesFromFile(filePath)).map((policy) => {
+          const id = conventionPolicyId(scope, basename(filePath), policy.name);
+          return { ...policy, id, enabled: !disabled.has(id) };
+        });
+      } catch {
+        // Still list the file — it IS installed and enforcing; we just cannot
+        // read its contents to name the policies.
+      }
+      out.push({ scope, file: basename(filePath), path: filePath, policies });
+    }
+  }
+  return out;
 }
 
 async function parseCustomPoliciesFromFile(filePath: string): Promise<CustomPolicyInfo[]> {
@@ -70,7 +163,7 @@ async function parseCustomPoliciesFromFile(filePath: string): Promise<CustomPoli
     const eventScope = eventsMatch
       ? eventsMatch[1].replace(/["'`\s]/g, "").split(",").filter(Boolean).join(", ")
       : undefined;
-    policies.push({ name: nameMatch[1], description: descMatch?.[1], eventScope });
+    policies.push({ name: nameMatch[1], description: descMatch?.[1], eventScope, id: "", enabled: true });
   }
   return policies;
 }
@@ -82,8 +175,12 @@ function buildEventScope(match: { events?: string[]; toolNames?: string[] }): st
 }
 
 export async function getHooksConfigAction(): Promise<HooksConfigPayload> {
-  const config = readHooksConfig();
+  const launchCwd = process.env.FAILPROOFAI_LAUNCH_CWD || process.cwd();
+  // Match runtime enforcement: project, local, and user config all
+  // contribute to the effective policy state shown by the dashboard.
+  const config = readMergedHooksConfig(launchCwd);
   const enabledSet = new Set(config.enabledPolicies);
+  const disabledCustomPolicies = new Set(config.disabledCustomPolicies ?? []);
 
   const installedScopes = HOOK_SCOPES.filter((s) => hooksInstalledInSettings(s));
   const primaryScope: HookScope = installedScopes[0] ?? "user";
@@ -113,9 +210,27 @@ export async function getHooksConfigAction(): Promise<HooksConfigPayload> {
     currentParams: p.params ? (config.policyParams?.[p.name] ?? {}) : undefined,
   }));
 
-  const customPolicies = config.customPoliciesPath
-    ? await parseCustomPoliciesFromFile(config.customPoliciesPath)
-    : undefined;
+  const customPoliciesPaths = configuredCustomPolicyPaths(config);
+  const launchRoot = findProjectConfigDir(launchCwd);
+  const resolvedCustomPaths = customPoliciesPaths.map((path) => resolve(launchRoot, path));
+  const parsedCustomPolicies = await Promise.all(resolvedCustomPaths.map(async (path) => {
+    try {
+      return (await parseCustomPoliciesFromFile(path)).map((policy) => {
+        const id = customPolicyId(path, policy.name);
+        return { ...policy, id, enabled: !disabledCustomPolicies.has(id) };
+      });
+    } catch {
+      // Keep the rest of the dashboard usable when one configured file is
+      // unreadable or disappears between existsSync and readFile.
+      return [];
+    }
+  }));
+  const customPolicies = parsedCustomPolicies.flat();
+
+  const conventionPolicies = await discoverConventionPolicies(
+    disabledCustomPolicies,
+    new Set(resolvedCustomPaths),
+  );
 
   return {
     enabledPolicies: config.enabledPolicies,
@@ -123,7 +238,9 @@ export async function getHooksConfigAction(): Promise<HooksConfigPayload> {
     settingsPath,
     clis,
     policies,
-    customPoliciesPath: config.customPoliciesPath,
-    customPolicies: customPolicies?.length ? customPolicies : undefined,
+    customPoliciesPaths: customPoliciesPaths.length ? customPoliciesPaths : undefined,
+    customPoliciesPath: customPoliciesPaths.length === 1 ? customPoliciesPaths[0] : undefined,
+    customPolicies: customPolicies.length ? customPolicies : undefined,
+    conventionPolicies,
   };
 }

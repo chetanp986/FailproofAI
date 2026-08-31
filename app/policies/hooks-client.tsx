@@ -1,27 +1,20 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, useRef, useTransition } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useTransition } from "react";
+import * as React from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import {
-  ShieldCheck,
-  ShieldX,
-  ShieldAlert,
-  Shield,
-  ChevronDown,
-  Copy,
-  Check,
-  Settings,
-  Code,
-  X,
-} from "lucide-react";
+import { Check, ChevronDown, Code, Copy, Settings, Shield, ShieldAlert, ShieldCheck, ShieldX, TriangleAlert, X } from "lucide-react";
 import PaginationControls from "@/app/components/pagination-controls";
 import { getHookActivityAction, searchHookActivityAction } from "@/app/actions/get-hook-activity";
 import type { HookActivityPayload } from "@/app/actions/get-hook-activity";
+import { getActivePausesAction } from "@/app/actions/get-active-pauses";
+import type { ActivePause } from "@/src/hooks/session-pause";
+import { PausedBanner, PausedNote, PausedPill } from "@/app/components/pause-notices";
 import { getHooksConfigAction } from "@/app/actions/get-hooks-config";
-import type { HooksConfigPayload, PolicyInfo, CustomPolicyInfo } from "@/app/actions/get-hooks-config";
+import type { HooksConfigPayload, PolicyInfo } from "@/app/actions/get-hooks-config";
 import type { IntegrationType } from "@/src/hooks/types";
-import { togglePolicyAction } from "@/app/actions/update-hooks-config";
+import { toggleCustomPolicyAction, togglePolicyAction } from "@/app/actions/update-hooks-config";
 import { installHooksWebAction, removeHooksWebAction } from "@/app/actions/install-hooks-web";
 import { updatePolicyParamsAction } from "@/app/actions/update-policy-params";
 import { useAutoRefresh } from "@/contexts/AutoRefreshContext";
@@ -29,6 +22,7 @@ import { usePostHog } from "@/contexts/PostHogContext";
 import { useUrlParams } from "@/lib/use-url-params";
 import { pageToParam, paramToPage } from "@/lib/url-filter-serializers";
 import { getCliLabel, getCliBadgeClasses, KNOWN_CLI_IDS, isKnownCli, type CliId } from "@/lib/cli-registry";
+import { enforcementFor } from "@/src/hooks/enforcement-capability";
 import { formatRelativeTime } from "@/lib/format-duration";
 import { Button } from "@/components/ui/button";
 
@@ -330,6 +324,58 @@ function StatsBar({ stats }: { stats: HookActivityPayload["stats"] }) {
 
 // -- Expandable Detail Panel --
 
+
+/**
+ * "Your policy ran, but this event cannot block on this CLI."
+ *
+ * Renders ONLY when the (cli, event) pair is a verified `observe`. A pair we
+ * have not traced returns undefined from `enforcementFor` and this renders
+ * nothing — a hedge ("capability unverified") would still be a claim, and
+ * unverified claims are the failure this whole matrix exists to prevent.
+ *
+ * The deny case matters more than the allow case: the row already says
+ * "denied", the activity store recorded a deny, and telemetry counted one — so
+ * without this note the UI actively reports enforcement that did not happen.
+ */
+function EnforcementNote({
+  item,
+}: {
+  item: HookActivityPayload["entries"][number];
+}) {
+  const capability = enforcementFor(
+    item.integration as IntegrationType | undefined,
+    item.eventType,
+  );
+  if (capability !== "observe") return null;
+
+  const ran = item.matchedPolicies ?? [];
+  // Rows written before matchedPolicies existed have no list; naming no policy
+  // is better than implying none ran.
+  if (ran.length === 0) return null;
+
+  const cli = item.integration ? getCliLabel(item.integration as IntegrationType) : "This CLI";
+  const names = ran.map((n) => n.replace(/^(custom|\.failproofai-(project|user))\//, ""));
+  const label = names.length === 1 ? names[0] : `${names.length} policies`;
+  const denied = item.decision === "deny";
+
+  return (
+    <div className="sm:col-span-2 lg:col-span-3 mt-1 flex items-start gap-2 rounded border border-amber-500/30 bg-amber-500/5 px-2.5 py-2">
+      <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-500/80 mt-0.5" aria-hidden="true" />
+      <p className="text-[0.7rem] leading-relaxed text-muted-foreground">
+        <span className="font-medium text-foreground">
+          {denied ? "Not enforced." : "Ran, but cannot enforce here."}
+        </span>{" "}
+        <span className="font-mono">{label}</span> ran on{" "}
+        <span className="font-mono">{item.eventType}</span>, but {cli} discards hook
+        verdicts for this event
+        {denied ? " — the action went ahead anyway." : ", so a policy cannot block here."}{" "}
+        Move the check to an event {cli} enforces on, such as{" "}
+        <span className="font-mono">PreToolUse</span>.
+      </p>
+    </div>
+  );
+}
+
 function DetailPanel({
   item,
 }: {
@@ -340,10 +386,31 @@ function DetailPanel({
       <td colSpan={11} className="px-0 py-0">
         <div className="activity-detail animate-expand text-xs">
           <span className="activity-detail-eyebrow">
-            <span aria-hidden="true">\u25be</span>
+            <span aria-hidden="true">{"\u25BE"}</span>
             event detail
           </span>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-2">
+            <PausedNote item={item} />
+            <EnforcementNote item={item} />
+            {item.policySource && (
+              <div>
+                <span className="text-muted-foreground">Decided by: </span>
+                <span className="font-mono text-foreground">
+                  {item.policySource === "cloud" && item.cloudPolicyId
+                    ? `cloud · ${item.cloudPolicyId} version ${item.cloudVersion}`
+                    : item.policySource}
+                </span>
+              </div>
+            )}
+            {item.cloudDeployment !== undefined && (
+              <div>
+                {/* Present on every row of a managed machine, not just cloud
+                    decisions — it is what separates a rollout that changed no
+                    outcomes from one that never arrived. */}
+                <span className="text-muted-foreground">Cloud deployment: </span>
+                <span className="font-mono text-foreground">{item.cloudDeployment}</span>
+              </div>
+            )}
             <div>
               <span className="text-muted-foreground">Session ID: </span>
               <span className="font-mono text-foreground">
@@ -400,6 +467,7 @@ function ActivityTab({
 
   const [page, setPage] = useState(() => paramToPage(url.get("page")));
   const [data, setData] = useState<HookActivityPayload | null>(null);
+  const [activePauses, setActivePauses] = useState<ActivePause[]>([]);
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   const [filterDecision, setFilterDecision] = useState<"" | "allow" | "deny" | "instruct">(() => {
@@ -413,10 +481,14 @@ function ActivityTab({
     const v = url.get("cli");
     return isKnownCli(v) ? v : "";
   });
+  const [filterSource, setFilterSource] = useState<"" | "builtin" | "custom" | "convention" | "cloud">(() => {
+    const v = url.get("source");
+    return v === "builtin" || v === "custom" || v === "convention" || v === "cloud" ? v : "";
+  });
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const filterTelemetryFirstRunRef = useRef(true);
-  const filtersRef = useRef({ filterDecision, filterEventType, filterPolicy, filterSessionId, filterCli });
-  filtersRef.current = { filterDecision, filterEventType, filterPolicy, filterSessionId, filterCli };
+  const filtersRef = useRef({ filterDecision, filterEventType, filterPolicy, filterSessionId, filterCli, filterSource });
+  filtersRef.current = { filterDecision, filterEventType, filterPolicy, filterSessionId, filterCli, filterSource };
 
   useEffect(() => {
     if (!mountedRef.current) {
@@ -429,17 +501,18 @@ function ActivityTab({
       policy: filterPolicy || undefined,
       session: filterSessionId || undefined,
       cli: filterCli || undefined,
+      source: filterSource || undefined,
       page: pageToParam(page),
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterDecision, filterEventType, filterPolicy, filterSessionId, filterCli, page]);
+  }, [filterDecision, filterEventType, filterPolicy, filterSessionId, filterCli, filterSource, page]);
 
-  const hasActiveFilters = filterDecision !== "" || filterEventType !== "" || filterPolicy !== "" || filterSessionId !== "" || filterCli !== "";
+  const hasActiveFilters = filterDecision !== "" || filterEventType !== "" || filterPolicy !== "" || filterSessionId !== "" || filterCli !== "" || filterSource !== "";
 
   const fetchData = useCallback(async (p: number) => {
     try {
-      const { filterDecision: fd, filterEventType: fe, filterPolicy: fp, filterSessionId: fs, filterCli: fc } = filtersRef.current;
-      const active = fd !== "" || fe !== "" || fp !== "" || fs !== "" || fc !== "";
+      const { filterDecision: fd, filterEventType: fe, filterPolicy: fp, filterSessionId: fs, filterCli: fc, filterSource: fsrc } = filtersRef.current;
+      const active = fd !== "" || fe !== "" || fp !== "" || fs !== "" || fc !== "" || fsrc !== "";
       let result: HookActivityPayload;
       if (active) {
         result = await searchHookActivityAction(
@@ -449,6 +522,7 @@ function ActivityTab({
             policyName: fp || undefined,
             sessionId: fs || undefined,
             integration: fc || undefined,
+            source: fsrc || undefined,
           },
           p,
         );
@@ -467,6 +541,22 @@ function ActivityTab({
     const id = setInterval(() => fetchData(page), ms);
     return () => clearInterval(id);
   }, [page, fetchData, intervalSec]);
+
+  // Pause state is polled independently of the activity page: it is live
+  // machine state, not a property of whichever rows are on screen, and it must
+  // keep updating while the user sits on page 3 of history.
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      getActivePausesAction()
+        .then((p) => { if (!cancelled) setActivePauses(p); })
+        .catch(() => { /* non-critical: the banner simply stays hidden */ });
+    };
+    load();
+    const ms = intervalSec > 0 ? intervalSec * 1000 : 5000;
+    const id = setInterval(load, ms);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [intervalSec]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -522,6 +612,10 @@ function ActivityTab({
 
   return (
     <>
+      {/* Above the stats, deliberately: a paused machine is the most important
+          thing on this screen, and the numbers below it are being produced with
+          local enforcement switched off. */}
+      <PausedBanner pauses={activePauses} />
       {data?.stats && data.stats.totalEvents > 0 && (
         <div style={{ marginBottom: 18 }}>
           <StatsBar stats={data.stats} />
@@ -548,6 +642,29 @@ function ActivityTab({
               <option value="SessionEnd">SessionEnd</option>
               <option value="UserPromptSubmit">UserPromptSubmit</option>
               <option value="PermissionRequest">PermissionRequest</option>
+            </select>
+          </div>
+          <div className="filter-group">
+            {/* "What did my organization's policies decide here?" is the
+                question cloud rollout reporting rests on, and it is
+                unanswerable while the source is only a prefix on a name. */}
+            <span className="filter-label">source</span>
+            <select
+              value={filterSource}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFilterSource(
+                  v === "builtin" || v === "custom" || v === "convention" || v === "cloud" ? v : "",
+                );
+              }}
+              className="filter-input"
+              aria-label="Filter by policy source"
+            >
+              <option value="">all sources</option>
+              <option value="builtin">builtin</option>
+              <option value="custom">custom</option>
+              <option value="convention">convention</option>
+              <option value="cloud">cloud</option>
             </select>
           </div>
           <div className="filter-group">
@@ -599,6 +716,7 @@ function ActivityTab({
                 setFilterCli("");
                 setFilterPolicy("");
                 setFilterSessionId("");
+                setFilterSource("");
               }}
               aria-label="Clear all filters"
             >
@@ -701,6 +819,7 @@ function ActivityTab({
                         </td>
                         <td className="px-3 py-2">
                           <DecisionBadge decision={item.decision} />
+                          {item.pausedBy && <PausedPill />}
                         </td>
                         <td className="px-3 py-2">
                           <EventTypeBadge eventType={item.eventType} />
@@ -1171,6 +1290,26 @@ function PoliciesTab({ onHooksInstallChange }: { onHooksInstallChange?: (install
     });
   };
 
+  const handleCustomToggle = (id: string, currentlyEnabled: boolean) => {
+    if (!config) return;
+    setConfig((prev) => prev ? {
+      ...prev,
+      customPolicies: prev.customPolicies?.map((p) => p.id === id ? { ...p, enabled: !currentlyEnabled } : p),
+      conventionPolicies: prev.conventionPolicies.map((entry) => ({
+        ...entry,
+        policies: entry.policies.map((p) => p.id === id ? { ...p, enabled: !currentlyEnabled } : p),
+      })),
+    } : prev);
+    startTransition(async () => {
+      try {
+        await toggleCustomPolicyAction(id, !currentlyEnabled);
+      } catch {
+        fireActionError("custom_policy_toggle", "Failed to save custom policy change.");
+        reload();
+      }
+    });
+  };
+
   const handleApply = () => {
     const { toInstall, toRemove } = pendingChanges;
     if (toInstall.length === 0 && toRemove.length === 0) return;
@@ -1233,7 +1372,7 @@ function PoliciesTab({ onHooksInstallChange }: { onHooksInstallChange?: (install
   if (!config) {
     return (
       <div className="flex items-center justify-center py-16">
-        <span className="text-sm text-muted-foreground">Loading\u2026</span>
+        <span className="text-sm text-muted-foreground">Loading{"\u2026"}</span>
       </div>
     );
   }
@@ -1427,7 +1566,7 @@ function PoliciesTab({ onHooksInstallChange }: { onHooksInstallChange?: (install
         <span className="text-xs text-muted-foreground">
           <span className="font-semibold text-foreground">{config.enabledPolicies.length}</span>
           {" / "}
-          {config.policies.length + (config.customPolicies?.length ?? 0)}{" "}
+          {config.policies.length + (config.customPolicies?.length ?? 0) + (config.conventionPolicies?.reduce((n, e) => n + e.policies.length, 0) ?? 0)}{" "}
           policies enabled
         </span>
         {installed && (
@@ -1546,7 +1685,7 @@ function PoliciesTab({ onHooksInstallChange }: { onHooksInstallChange?: (install
       })}
 
       {/* Custom policies section */}
-      {config.customPoliciesPath && (
+      {(config.customPoliciesPaths?.length || config.customPoliciesPath) && (
         <div>
           {/* Section header — matches category header style */}
           <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border/50">
@@ -1557,26 +1696,28 @@ function PoliciesTab({ onHooksInstallChange }: { onHooksInstallChange?: (install
               {config.customPolicies?.length ?? 0} detected
             </span>
           </div>
-          {/* File path row */}
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-border/20">
-            <Code className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-xs font-mono text-muted-foreground truncate">{config.customPoliciesPath}</span>
-          </div>
+          {(config.customPoliciesPaths ?? [config.customPoliciesPath!]).map((path) => (
+            <div key={path} className="flex items-center gap-3 px-4 py-3 border-b border-border/20">
+              <Code className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <span className="text-xs font-mono text-muted-foreground truncate">{path}</span>
+            </div>
+          ))}
           {/* Reconfigure notice */}
           <div className="flex items-start gap-2 px-4 py-2.5 border-b border-border/20 bg-muted/10">
             <Shield className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0 mt-0.5" />
             <p className="text-[0.7rem] text-muted-foreground/70 leading-relaxed">
-              Custom policies are always active. To add, remove, or reorder them, edit the JS file above.
+              Re-run the install command to add, remove, or reorder files.
             </p>
           </div>
           {/* Rich policy rows — mirrors built-in layout without toggle */}
           {config.customPolicies?.map((policy) => (
             <div
-              key={policy.name}
+              key={policy.id}
               className="flex items-start gap-3 px-4 py-3 border-b border-border/20 hover:bg-muted/20 transition-colors"
             >
-              {/* Invisible spacer matching PolicyToggle dimensions (h-4 w-7) */}
-              <div className="h-4 w-7 shrink-0 mt-0.5" />
+              <div className="mt-0.5 shrink-0">
+                <PolicyToggle enabled={policy.enabled} onChange={() => handleCustomToggle(policy.id, policy.enabled)} disabled={isPending} />
+              </div>
               <div className="flex items-center gap-1.5 min-w-0 w-56 shrink-0 mt-0.5">
                 <span className="text-xs font-mono text-foreground truncate">{policy.name}</span>
               </div>
@@ -1596,6 +1737,60 @@ function PoliciesTab({ onHooksInstallChange }: { onHooksInstallChange?: (install
           ))}
         </div>
       )}
+
+      {/* Convention policies — discovered from .failproofai/policies/, never
+          from config, so they are grouped by the file that declares them. */}
+      {config.conventionPolicies?.map((entry) => (
+        <div key={entry.path}>
+          <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border/50">
+            <span className="text-[0.7rem] font-semibold uppercase tracking-wider text-muted-foreground">
+              Convention Policies — {entry.scope === "project" ? "Project" : "User"}
+            </span>
+            <span className="text-[0.7rem] text-muted-foreground">
+              {entry.policies.length} hook{entry.policies.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 px-4 py-3 border-b border-border/20">
+            <Code className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs font-mono text-muted-foreground truncate">{entry.path}</span>
+          </div>
+          {entry.policies.length === 0 ? (
+            <div className="flex items-start gap-2 px-4 py-2.5 border-b border-border/20 bg-muted/10">
+              <Shield className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0 mt-0.5" />
+              <p className="text-[0.7rem] text-muted-foreground/70 leading-relaxed">
+                No policies could be read from this file. It is still loaded at runtime —
+                run <span className="font-mono">failproofai policies</span> to see what it registers.
+              </p>
+            </div>
+          ) : (
+            entry.policies.map((policy) => (
+              <div
+                key={`${entry.path}:${policy.name}`}
+                className="flex items-start gap-3 px-4 py-3 border-b border-border/20 hover:bg-muted/20 transition-colors"
+              >
+                <div className="mt-0.5 shrink-0">
+                  <PolicyToggle enabled={policy.enabled} onChange={() => handleCustomToggle(policy.id, policy.enabled)} disabled={isPending} />
+                </div>
+                <div className="flex items-center gap-1.5 min-w-0 w-56 shrink-0 mt-0.5">
+                  <span className="text-xs font-mono text-foreground truncate">{policy.name}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  {policy.description && (
+                    <span className="text-xs text-muted-foreground leading-relaxed">
+                      {policy.description}
+                    </span>
+                  )}
+                  {policy.eventScope && (
+                    <span className="block text-[0.65rem] text-muted-foreground/40 font-mono mt-0.5 hidden lg:block">
+                      {policy.eventScope}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ))}
     </div>
     </>
   );
@@ -1646,7 +1841,10 @@ export default function HooksClient({ initialTab = "activity" }: { initialTab?: 
         setHooksInstalled(cfg.clis.some((c) => c.installed));
         setPolicyCounts({
           enabled: cfg.enabledPolicies.length,
-          total: cfg.policies.length + (cfg.customPolicies?.length ?? 0),
+          total:
+            cfg.policies.length +
+            (cfg.customPolicies?.length ?? 0) +
+            (cfg.conventionPolicies?.reduce((n, e) => n + e.policies.length, 0) ?? 0),
         });
         setInstalledCliLabels(cfg.clis.filter((c) => c.installed).map((c) => c.label));
       })

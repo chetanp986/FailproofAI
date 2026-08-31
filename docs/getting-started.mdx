@@ -159,8 +159,10 @@ All configuration and logs stay on your machine:
 | Path | What it stores |
 |------|----------------|
 | `~/.failproofai/policies-config.json` | Global policy config |
-| `~/.failproofai/hook-activity.jsonl` | Hook execution history |
-| `~/.failproofai/hook.log` | Debug log for custom hook errors |
+| `~/.failproofai/policies/` | Your own policies — drop `*-policies.mjs` in, no config needed |
+| `~/.failproofai/policies/cloud-policies/` | Policies deployed to this machine by your organisation |
+| `~/.failproofai/hook-activity/` | Hook execution history (paged JSONL) |
+| `~/.failproofai/logs/` | Debug logs for custom hook errors |
 | `.failproofai/policies-config.json` | Per-project config (committed) |
 | `.failproofai/policies-config.local.json` | Personal overrides (gitignored) |
 

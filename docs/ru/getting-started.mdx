@@ -1,13 +1,13 @@
 ---
-title: Быстрый старт
-description: "Установите failproofai, включите политики и дайте своим агентам работать надёжно"
+title: Начало работы
+description: "Установите failproofai, включите политики и позвольте вашим агентам работать надёжно"
 icon: rocket
 ---
 
 ## Требования
 
 - **Node.js** >= 20.9.0
-- **Bun** >= 1.3.0 (опционально - требуется только для сборки из исходного кода)
+- **Bun** >= 1.3.0 (опционально - требуется только для сборки из исходников)
 
 ---
 
@@ -31,15 +31,15 @@ bun add -g failproofai
 
 <Steps>
   <Step title="Включите политики">
-    Политики — это правила, которые выполняются перед и после каждого вызова инструмента агентом. Они перехватывают деструктивные команды, утечки секретов и другие сбои до того, как они нанесут ущерб.
+    Политики — это правила, которые выполняются до и после каждого вызова инструмента агентом. Они перехватывают деструктивные команды, утечки секретов и другие режимы отказов до того, как они причинят вред.
 
     ```bash
     failproofai policies --install
     ```
 
-    Эта команда записывает записи хуков в установленные CLI агентов (Claude Code's `~/.claude/settings.json`, OpenAI Codex's `~/.codex/hooks.json`, GitHub Copilot CLI's `~/.copilot/hooks/failproofai.json`, Cursor Agent's `~/.cursor/hooks.json`, OpenCode's generated plugin shim at `~/.config/opencode/plugins/failproofai.mjs` plus a registration entry in `~/.config/opencode/opencode.json`'s `plugin` array, Pi's `~/.pi/agent/settings.json`, или Hermes's `~/.hermes/config.yaml`). Если присутствует несколько, вам будет предложено выбрать; передайте `--cli claude codex copilot cursor opencode pi hermes` (любое подмножество), чтобы пропустить запрос.
+    Это добавляет записи крючков в установленные CLI агентов (Claude Code в `~/.claude/settings.json`, OpenAI Codex в `~/.codex/hooks.json`, GitHub Copilot CLI в `~/.copilot/hooks/failproofai.json`, Cursor Agent в `~/.cursor/hooks.json`, OpenCode в сгенерированный модуль плагина `~/.config/opencode/plugins/failproofai.mjs` плюс запись регистрации в массиве `plugin` файла `~/.config/opencode/opencode.json`, Pi в `~/.pi/agent/settings.json`, Hermes в `~/.hermes/config.yaml`, OpenClaw в `~/.openclaw/openclaw.json`, Factory Droid в `~/.factory/hooks.json`, Devin CLI в `~/.config/devin/config.json`, Antigravity CLI в `~/.gemini/config/hooks.json` или Goose в автоматически обнаруживаемую директорию плагинов `~/.agents/plugins/failproofai/hooks/hooks.json`). Если присутствует более одного, вам будет предложено выбрать; передайте `--cli claude codex copilot cursor opencode pi hermes openclaw factory devin antigravity goose` (любое подмножество), чтобы пропустить запрос.
 
-    GitHub Copilot CLI, Cursor Agent, OpenCode и Pi поддерживаются в режиме **бета** — установите с помощью `--cli copilot`, `--cli cursor`, `--cli opencode` или `--cli pi`. Hermes (hermes-agent, шлюз Slack/Telegram) устанавливается в область пользователя с помощью `--cli hermes` и также является источником автономного аудита.
+    Поддержка GitHub Copilot CLI, Cursor Agent, OpenCode и Pi находится на **стадии бета** — устанавливайте с `--cli copilot`, `--cli cursor`, `--cli opencode` или `--cli pi`. Hermes (hermes-agent, шлюз Slack/Telegram) устанавливается с пользовательской областью с `--cli hermes` и также является **источником офлайн-аудита**. OpenClaw (шлюз openclaw, самостоятельно размещаемый многоканальный помощник) устанавливается с пользовательской областью с `--cli openclaw` — принудительное применение работает через его встроенные крючки плагина (`before_agent_finalize` — это реальный запрос на конец хода, поэтому встроенные `require-*-before-stop` применяются) — и является **также источником офлайн-аудита**. Factory Droid (`droid`) устанавливается с `--cli factory` (пользовательская + проектная область) и является **также источником офлайн-аудита**. Devin CLI (`devin`, Cognition) устанавливается с `--cli devin` (пользовательская + проектная область) и является **также источником офлайн-аудита**. Antigravity CLI (`agy`) устанавливается с `--cli antigravity` (пользовательская + проектная область) и является **также источником офлайн-аудита**. Goose (кодовое имя goose, Block) устанавливается с `--cli goose` (пользовательская + проектная область) — установщик просто создаёт директорию плагина в `~/.agents/plugins/failproofai/`, которую Goose автоматически обнаруживает, и это **также источник офлайн-аудита**.
 
     ```bash
     failproofai policies --install --scope project
@@ -49,25 +49,30 @@ bun add -g failproofai
     failproofai policies --install --cli opencode --scope project
     failproofai policies --install --cli pi --scope project
     failproofai policies --install --cli hermes --scope user
+    failproofai policies --install --cli openclaw --scope user
+    failproofai policies --install --cli factory --scope project
+    failproofai policies --install --cli devin --scope project
+    failproofai policies --install --cli antigravity --scope project
+    failproofai policies --install --cli goose --scope project
     failproofai policies --install block-sudo block-rm-rf sanitize-api-keys
     ```
   </Step>
-  <Step title="Проверка">
+  <Step title="Проверьте">
     ```bash
     failproofai policies
     ```
 
-    Показывает все политики, включены ли они и все настроенные параметры.
+    Показывает все политики, включены ли они и любые настроенные параметры.
   </Step>
   <Step title="Запустите панель управления">
     ```bash
     failproofai
     ```
 
-    Открывает локальную панель управления на `http://localhost:8020`, где вы можете просматривать сессии, инспектировать вызовы инструментов и управлять политиками.
+    Открывает локальную панель управления по адресу `http://localhost:8020`, где вы можете просматривать сеансы, проверять вызовы инструментов и управлять политиками.
   </Step>
-  <Step title="Запустите своего агента">
-    Запустите Claude Code как обычно. Если агент попытается что-то рискованное, failproofai автоматически это перехватит. Оставьте его работать без присмотра и просмотрите результаты на панели управления.
+  <Step title="Запустите вашего агента">
+    Запустите Claude Code как обычно. Если агент попытается сделать что-то рискованное, failproofai автоматически это перехватит. Оставьте его работать без присмотра и посмотрите что произошло на панели управления.
   </Step>
 </Steps>
 
@@ -85,19 +90,19 @@ Claude Code  →  failproofai --hook PreToolUse  →  читает JSON из std
 
 Каждая политика возвращает одно из трёх решений:
 
-- **allow** — агент работает нормально
-- **deny** — действие блокируется, агенту сообщается причина
-- **instruct** — в запрос агента добавляется дополнительный контекст
+- **allow** - агент работает нормально
+- **deny** - действие блокируется, агенту объясняют почему
+- **instruct** - дополнительный контекст добавляется в приглашение агента
 
 <Note>
-Политики выполняются в вашем локальном процессе. Ничего не отправляется на удалённый сервис.
+Политики выполняются в вашем локальном процессе. Ничего не отправляется удалённому сервису.
 </Note>
 
 ---
 
-## Установите командные политики с использованием соглашения о политиках
+## Настройка командных политик с помощью политик на основе соглашений
 
-Самый быстрый способ установить стандарты качества в вашей команде — это соглашение `.failproofai/policies/`. Просто добавьте файлы политик в эту директорию, и они будут загружены автоматически — без флагов, без изменения конфигурации, без команд установки.
+Самый быстрый способ установить стандарты качества в вашей команде — это соглашение `.failproofai/policies/`. Поместите файлы политик в эту директорию и они будут загружены автоматически — без флагов, без изменения конфигурации, без команд установки.
 
 <Steps>
   <Step title="Создайте директорию политик">
@@ -106,7 +111,7 @@ Claude Code  →  failproofai --hook PreToolUse  →  читает JSON из std
     ```
   </Step>
   <Step title="Добавьте файлы политик">
-    Скопируйте примеры-шаблоны или напишите свои собственные:
+    Скопируйте примеры для начинающих или напишите свои:
 
     ```bash
     cp node_modules/failproofai/examples/convention-policies/*.mjs .failproofai/policies/
@@ -124,39 +129,39 @@ Claude Code  →  failproofai --hook PreToolUse  →  читает JSON из std
       fn: async (ctx) => {
         if (ctx.toolName !== "Bash") return allow();
         if (/git\s+commit/.test(ctx.toolInput?.command ?? "")) {
-          return instruct("Run tests before committing.");
+          return instruct("Запустите тесты перед коммитом.");
         }
         return allow();
       },
     });
     ```
   </Step>
-  <Step title="Зафиксируйте в git">
+  <Step title="Закоммитьте в git">
     ```bash
     git add .failproofai/policies/
     git commit -m "Add team quality policies"
     ```
 
-    Каждый член команды, у которого установлен failproofai, автоматически получит эти политики. Не требуется настройка для каждого разработчика.
+    Каждый член команды с установленным failproofai автоматически получает эти политики. Не требуется настройка для каждого разработчика.
   </Step>
 </Steps>
 
 <Tip>
-Зафиксируйте `.failproofai/policies/` в вашем репозитории, чтобы вся команда следовала одним и тем же стандартам. По мере того, как ваша команда обнаруживает новые способы сбоев, добавляйте политики и публикуйте их — все получат обновление при следующем `git pull`. Со временем эти политики становятся живым стандартом качества, который постоянно улучшается.
+Закоммитьте `.failproofai/policies/` в ваш репозиторий, чтобы вся команда придерживалась одних и тех же стандартов. По мере того как ваша команда открывает новые режимы отказов, добавляйте политики и отправляйте их — все получат обновление при следующем `git pull`. Со временем эти политики становятся живым стандартом качества, который постоянно улучшается.
 </Tip>
 
 ---
 
 ## Хранение данных
 
-Вся конфигурация и логи остаются на вашем компьютере:
+Вся конфигурация и логи остаются на вашей машине:
 
-| Путь | Что здесь хранится |
-|------|---|
-| `~/.failproofai/policies-config.json` | Глобальная конфигурация политик |
-| `~/.failproofai/hook-activity.jsonl` | История выполнения хуков |
-| `~/.failproofai/hook.log` | Лог отладки для ошибок пользовательских хуков |
-| `.failproofai/policies-config.json` | Конфигурация для конкретного проекта (зафиксирована в git) |
+| Путь | Что хранится |
+|------|----------------|
+| `~/.failproofai/policies/local-policies/policies-config.json` | Глобальная конфигурация политик |
+| `~/.failproofai/hook-activity/` | История выполнения крючков (постраничный JSONL) |
+| `~/.failproofai/logs/` | Логи отладки для ошибок пользовательских крючков |
+| `.failproofai/policies-config.json` | Конфигурация на проект (коммитится) |
 | `.failproofai/policies-config.local.json` | Личные переопределения (в .gitignore) |
 
 ---
@@ -167,7 +172,7 @@ Claude Code  →  failproofai --hook PreToolUse  →  читает JSON из std
 failproofai policies --uninstall
 ```
 
-Удаляет записи хуков из `~/.claude/settings.json`. Файлы конфигурации в `~/.failproofai/` сохраняются.
+Удаляет записи крючков из `~/.claude/settings.json`. Файлы конфигурации в `~/.failproofai/` сохраняются.
 
 ---
 
@@ -176,7 +181,7 @@ failproofai policies --uninstall
 <CardGroup cols={2}>
 
 <Card title="Конфигурация" icon="gear" href="/ru/configuration">
-  Области действия и формат файла конфигурации
+  Области и формат файла конфигурации
 </Card>
 
 <Card title="Встроенные политики" icon="shield" href="/ru/built-in-policies">
@@ -187,8 +192,8 @@ failproofai policies --uninstall
   Напишите свои политики на JavaScript
 </Card>
 
-<Card title="Монитор агента" icon="chart-line" href="/ru/dashboard">
-  Мониторьте сессии и проверяйте активность политик
+<Card title="Монитор агентов" icon="chart-line" href="/ru/dashboard">
+  Мониторьте сеансы и просматривайте активность политик
 </Card>
 
 </CardGroup>

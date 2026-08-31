@@ -3,7 +3,7 @@
  * Supports transitive local imports and `import { ... } from 'failproofai'`.
  *
  * Two loading modes:
- * 1. Explicit: a single file via `customPoliciesPath` in policies-config.json
+ * 1. Explicit: files via `customPoliciesPaths` in policies-config.json
  * 2. Convention: auto-discovered *policies.{js,mjs,ts} files from
  *    .failproofai/policies/ at project and user level (git-hooks style)
  *
@@ -11,21 +11,57 @@
  * and results in an empty hook list for that file. Builtins continue normally.
  */
 import { resolve, isAbsolute, basename } from "node:path";
+import { randomUUID } from "crypto";
 import { existsSync, readdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import { hookLogWarn, hookLogError, hookLogInfo } from "./hook-logger";
-import { getCustomHooks, clearCustomHooks } from "./custom-hooks-registry";
-import { findDistIndex, rewriteFileTree, TMP_SUFFIX, cleanupTmpFiles } from "./loader-utils";
+import { customPolicies, getCustomHooks, clearCustomHooks } from "./custom-hooks-registry";
+import {
+  findDistIndex,
+  rewriteFileTree,
+  TMP_SUFFIX,
+  cleanupTmpFiles,
+  isTmpArtifact,
+  sweepStaleTmpArtifacts,
+} from "./loader-utils";
 import { findProjectConfigDir } from "./hooks-config";
 import { trackHookEvent } from "./hook-telemetry";
 import { getInstanceId } from "../../lib/telemetry-id";
 import type { CustomHook } from "./policy-types";
+import type { CloudManagedPolicyArtifact } from "./cloud-managed-policies";
+import { customPoliciesDir, shimsDir } from "./fp-home";
 
 const LOADING_KEY = "__FAILPROOFAI_LOADING_HOOKS__";
 
 /** Regex matching convention policy filenames: *policies.{js,mjs,ts} */
 const CONVENTION_FILE_RE = /policies\.(js|mjs|ts)$/;
+
+/** Monotonic suffix for physically distinct temporary module trees. Bun
+ * ignores URL query strings when caching imports, so a query-only cache
+ * buster silently drops custom policies after the first request in the warm
+ * daemon worker. A unique filename is honored by both Bun and Node. */
+let loadSequence = 0;
+
+interface CachedPolicyModule {
+  fingerprint: string;
+  hooks: CustomHook[];
+}
+
+/** One retained module instance per source entry. Reusing its registered hook
+ * functions prevents an unbounded ESM module-cache leak in the resident worker.
+ * A source-tree change replaces this entry and imports one new module. */
+const policyModuleCache = new Map<string, CachedPolicyModule>();
+/**
+ * Cap, for the reason `gitBranchCache` states and this cache did not carry
+ * over: a warm worker touching many projects over its lifetime must not grow
+ * this unboundedly. Keyed by absolute policy-file path and holding cloned hook
+ * closures, so the entries are not small. Cleared wholesale rather than evicted
+ * one at a time — the next load simply re-imports, which is the same cost the
+ * cache exists to avoid paying twice, not a correctness change.
+ */
+const POLICY_MODULE_CACHE_MAX_ENTRIES = 500;
 
 /** Script extensions we could load, used to spot near-miss filenames. */
 const LOADABLE_EXT_RE = /\.(js|mjs|ts)$/;
@@ -68,7 +104,11 @@ export function findSkippedPolicyFiles(dir: string): string[] {
           e.isFile() &&
           LOADABLE_EXT_RE.test(e.name) &&
           !CONVENTION_FILE_RE.test(e.name) &&
-          !e.name.endsWith(".d.ts"),
+          !e.name.endsWith(".d.ts") &&
+          // Never our own generated files. They are `.mjs` and never match the
+          // convention, so each one a killed load left behind was reported to
+          // the user as a policy file that would not load.
+          !isTmpArtifact(e.name),
       )
       .map((e) => e.name)
       .sort((a, b) => a.localeCompare(b));
@@ -78,12 +118,68 @@ export function findSkippedPolicyFiles(dir: string): string[] {
 }
 
 /**
+ * How long a policy module gets to finish evaluating its top level.
+ *
+ * Matches the 10s `handler.ts` gives a policy's `fn` to run, for the same
+ * reason: a policy file is user code, and user code that hangs must cost one
+ * skipped policy rather than the process.
+ *
+ * `FAILPROOFAI_POLICY_LOAD_TIMEOUT_MS` shortens it for tests — a suite proving
+ * the deadline fires should not have to sit out the real one.
+ */
+function moduleLoadTimeoutMs(): number {
+  const override = Number(process.env.FAILPROOFAI_POLICY_LOAD_TIMEOUT_MS);
+  return Number.isFinite(override) && override > 0 ? override : 10_000;
+}
+
+/**
+ * `import()`, but it cannot hang forever.
+ *
+ * A bare `await import(...)` on a module whose top level contains an `await`
+ * that never resolves never settles — it does not reject, so no `catch` and no
+ * `finally` anywhere above it ever runs. In the one-shot hook path that costs
+ * one hook process, which the agent CLI's own timeout reaps. In the warm daemon
+ * worker it holds `worker-server.ts`'s serialization chain forever, and every
+ * subsequent hook on the machine queues behind it and fail-closed denies.
+ *
+ * Losing the race does NOT cancel the import — nothing can. It stops us
+ * *waiting* on it, which is the part that matters, and the caller's `catch`
+ * below reports the file as failed to load. The abandoned module keeps its
+ * half-initialized entry in the ESM cache, but each load writes a uniquely
+ * named temporary tree, so a retry imports a different specifier and is never
+ * poisoned by it.
+ */
+async function importWithDeadline(fileUrl: string): Promise<void> {
+  const budget = moduleLoadTimeoutMs();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      import(/* webpackIgnore: true */ fileUrl),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`timed out loading module after ${budget}ms`)),
+          budget,
+        );
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Load a single policy file into the globalThis custom hooks registry.
  * Does NOT clear the registry — caller is responsible for that.
  */
 async function loadSingleFile(
   absPath: string,
-  opts?: { strict?: boolean; conventionScope?: "project" | "user" },
+  opts?: {
+    strict?: boolean;
+    conventionScope?: "project" | "user";
+    /** Cloud-managed policies pass their pinned digest for load-time re-verification. */
+    verifyEntrySha?: string;
+  },
 ): Promise<void> {
   const g = globalThis as Record<string, unknown>;
   g[LOADING_KEY] = true;
@@ -93,18 +189,48 @@ async function loadSingleFile(
     const distIndex = await findDistIndex();
     const distUrl = distIndex ? pathToFileURL(distIndex).href : null;
 
-    tmpFiles = await rewriteFileTree(absPath, distUrl, distIndex);
+    const sequence = ++loadSequence;
+    // pid + sequence is not unique enough on its own: two containers sharing a
+    // mounted HOME, or two pid namespaces, can collide — and on the shim's
+    // fallback path a collision means EEXIST, which fails the load OPEN. A
+    // random id removes the class. It costs nothing: `fingerprintTemporaryTree`
+    // normalises the whole suffix away, so the module cache still hits.
+    const tmpSuffix = `${TMP_SUFFIX}.${process.pid}.${sequence}.${randomUUID()}.mjs`;
+    tmpFiles = await rewriteFileTree(
+      absPath,
+      distUrl,
+      distIndex,
+      tmpSuffix,
+      opts?.verifyEntrySha,
+    );
 
-    const entryTmp = absPath + TMP_SUFFIX;
+    const fingerprint = await fingerprintTemporaryTree(tmpFiles, tmpSuffix);
+    const cached = policyModuleCache.get(absPath);
+    if (cached?.fingerprint === fingerprint) {
+      for (const hook of cached.hooks) customPolicies.add({ ...hook });
+      return;
+    }
+
+    const entryTmp = absPath + tmpSuffix;
     const fileUrl = pathToFileURL(entryTmp).href;
-    await import(/* webpackIgnore: true */ fileUrl);
+    const hooksBefore = getCustomHooks().length;
+    await importWithDeadline(fileUrl);
+    if (policyModuleCache.size >= POLICY_MODULE_CACHE_MAX_ENTRIES) policyModuleCache.clear();
+    policyModuleCache.set(absPath, {
+      fingerprint,
+      hooks: getCustomHooks()
+        .slice(hooksBefore)
+        .map((hook) => ({ ...hook })),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const errorType = /Cannot find module|MODULE_NOT_FOUND|ENOENT/i.test(msg)
       ? "module_not_found"
       : /SyntaxError|Unexpected token/i.test(msg)
         ? "syntax_error"
-        : "runtime_error";
+        : /timed out loading module/i.test(msg)
+          ? "load_timeout"
+          : "runtime_error";
     void trackHookEvent(getInstanceId(), "custom_hooks_load_error", {
       error_type: errorType,
       is_convention: !!opts?.conventionScope,
@@ -117,6 +243,18 @@ async function loadSingleFile(
     g[LOADING_KEY] = false;
     await cleanupTmpFiles(tmpFiles);
   }
+}
+
+async function fingerprintTemporaryTree(tmpFiles: string[], tmpSuffix: string): Promise<string> {
+  const hash = createHash("sha256");
+  for (const tmpFile of [...tmpFiles].sort()) {
+    // The generated filenames change per load. Normalize both the logical path
+    // and rewritten import specifiers so identical source graphs hash equally.
+    hash.update(tmpFile.replaceAll(tmpSuffix, TMP_SUFFIX));
+    const contents = await readFile(tmpFile, "utf8");
+    hash.update(contents.replaceAll(tmpSuffix, TMP_SUFFIX));
+  }
+  return hash.digest("hex");
 }
 
 /**
@@ -157,6 +295,14 @@ export interface LoadAllResult {
   conventionSources: ConventionSource[];
 }
 
+export function customPolicyId(file: string, name: string): string {
+  return `custom:${file}:${name}`;
+}
+
+export function conventionPolicyId(scope: "project" | "user", file: string, name: string): string {
+  return `convention:${scope}:${file}:${name}`;
+}
+
 /**
  * Load ALL custom hooks: explicit customPoliciesPath + convention-discovered files.
  *
@@ -185,8 +331,12 @@ function warnSkippedPolicyFiles(dir: string, scope: "project" | "user"): void {
 }
 
 export async function loadAllCustomHooks(
-  customPoliciesPath: string | undefined,
-  opts?: { sessionCwd?: string; customPoliciesEnabled?: boolean },
+  customPoliciesPaths: string | string[] | undefined,
+  opts?: {
+    sessionCwd?: string;
+    customPoliciesEnabled?: boolean;
+    cloudManagedPolicies?: CloudManagedPolicyArtifact[];
+  },
 ): Promise<LoadAllResult> {
   clearCustomHooks();
 
@@ -201,31 +351,141 @@ export async function loadAllCustomHooks(
   // purpose, so switching off *discovery* shouldn't silently drop it too.
   const conventionEnabled = opts?.customPoliciesEnabled !== false;
 
-  // 1. Explicit customPoliciesPath (existing behavior)
-  if (customPoliciesPath) {
-    const absPath = isAbsolute(customPoliciesPath)
-      ? customPoliciesPath
-      : resolve(projectRoot, customPoliciesPath);
+  // Every file already imported this call, by resolved absolute path. Loading
+  // one twice is never right: `customPolicies.add` is an unconditional push, so
+  // the second import registers every hook a second time and the policy runs
+  // twice per event. Seeded by the explicit path below and consulted by both
+  // convention passes.
+  const loadedPaths = new Set<string>();
+
+  // Cloud policies keyed by the artifact they resolve to — and artifacts are
+  // CONTENT-ADDRESSED, so two policies whose source is byte-identical share one
+  // path. Building this map with a plain `new Map(entries)` let the last one win
+  // silently, and since `loadedPaths` then loads that file exactly once, the
+  // other policy vanished: its id never appeared in `failproofai policies` or in
+  // the decision log, and — the part that matters — ITS EFFECT DECIDED NOTHING.
+  // An `enforce` policy sharing bytes with an `observe` one was downgraded to
+  // observation, which is a silent enforcement gap, and the reverse turned a
+  // measurement-only rollout into live denials.
+  //
+  // It could not happen before the flattening: `deployments/<n>/<id>.mjs` gave
+  // every policy its own path even when the bytes matched.
+  //
+  // One module instance is right — `customPolicies.add` is an unconditional
+  // push, so importing the file twice would register every hook twice and run
+  // the policy twice per event. So the collision is resolved rather than
+  // avoided, and it resolves toward ENFORCEMENT: over-enforcing is visible to
+  // whoever hits it, while under-enforcing is exactly the silent failure this
+  // codebase exists to remove. It is also announced, so an operator can give the
+  // two policies distinguishable source instead of living with the merge.
+  const cloudManagedByPath = new Map<string, CloudManagedPolicyArtifact>();
+  for (const policy of opts?.cloudManagedPolicies ?? []) {
+    const key = resolve(policy.path);
+    const existing = cloudManagedByPath.get(key);
+    if (!existing) {
+      cloudManagedByPath.set(key, policy);
+      continue;
+    }
+    hookLogWarn(
+      `cloud-managed policies ${existing.id} and ${policy.id} have identical source, so they share ` +
+        `one artifact and load as one policy; enforcing it if either asks to enforce`,
+    );
+    if (existing.effect !== "enforce" && policy.effect === "enforce") {
+      cloudManagedByPath.set(key, policy);
+    }
+  }
+
+  // 1. Explicit custom policy paths. Accept a string for callers/configs using
+  // the legacy singular form.
+  for (const customPoliciesPath of typeof customPoliciesPaths === "string"
+    ? [customPoliciesPaths]
+    : customPoliciesPaths ?? []) {
+    // resolve() also normalizes absolute paths, so aliases containing `.` or
+    // `..` share a dedup key with convention-discovered canonical paths.
+    const absPath = resolve(projectRoot, customPoliciesPath);
     if (existsSync(absPath)) {
-      await loadSingleFile(absPath);
+      if (!loadedPaths.has(absPath)) {
+        loadedPaths.add(absPath);
+        const hooksBefore = getCustomHooks().length;
+        // A cloud-managed policy re-verifies its pinned digest at load, binding
+        // the imported bytes to what desired-state promised.
+        await loadSingleFile(absPath, {
+          verifyEntrySha: cloudManagedByPath.get(absPath)?.sha256,
+        });
+        for (const hook of getCustomHooks().slice(hooksBefore)) {
+          const cloudManaged = cloudManagedByPath.get(absPath);
+          const tagged = hook as CustomHook & {
+            __policyId?: string;
+            __cloudManaged?: CloudManagedPolicyArtifact;
+          };
+          if (cloudManaged) {
+            tagged.__cloudManaged = cloudManaged;
+            tagged.__policyId = `cloud:${cloudManaged.id}@${cloudManaged.version}:${hook.name}`;
+          } else {
+            tagged.__policyId = customPolicyId(absPath, hook.name);
+          }
+        }
+      }
     } else {
-      hookLogWarn(`customPoliciesPath not found: ${absPath}`);
+      hookLogWarn(`custom policy path not found: ${absPath}`);
     }
   }
 
   const hooksBeforeConvention = getCustomHooks().length;
 
   // 2. Project convention: {projectRoot}/.failproofai/policies/*policies.{js,mjs,ts}
+  //
+  // A `customPoliciesPath` pointing INTO this directory at a file whose name
+  // also matches the convention (`*policies.{js,mjs,ts}`) is an ordinary setup —
+  // `failproofai policies -i -c .failproofai/policies/my-policies.mjs` produces
+  // exactly that — and it is discovered here as well. Skip what step 1 loaded,
+  // or the file is imported twice and every hook in it fires twice per event.
   const projectDir = resolve(projectRoot, ".failproofai", "policies");
-  if (conventionEnabled) warnSkippedPolicyFiles(projectDir, "project");
-  const projectFiles = conventionEnabled ? discoverPolicyFiles(projectDir) : [];
+  // Clear out generated files a killed load left behind, before anything scans
+  // this directory. The temporary tree has to be written beside the sources for
+  // a rewritten relative import to resolve, and its name now carries a pid and
+  // sequence number — so unlike the old fixed name, each abnormal termination
+  // leaks one file permanently rather than leaving one that the next load
+  // overwrites. Best-effort and age-gated, so it can never remove a tree
+  // another process is still importing.
+  // WHICH SCOPE this directory is depends on whether it IS the user directory.
+  // Run an agent CLI with the cwd set to $HOME and `<cwd>/.failproofai/policies`
+  // resolves to `~/.failproofai/policies` — the user scope itself. Layout 3 made
+  // that reachable by collapsing `customPoliciesDir()` onto `policiesDir()`;
+  // layout 2 nested the user directory one level deeper, so the two could never
+  // be the same path.
+  //
+  // Tagging it `project` there would make a policy's id depend on where the
+  // agent happened to be launched from — `convention:project:x-policies.mjs:foo`
+  // from $HOME and `convention:user:x-policies.mjs:foo` from anywhere else — and
+  // a disable is RECORDED AGAINST THAT ID. So a user who switched a policy off
+  // would find it firing again whenever they worked out of their home
+  // directory, with nothing to explain it. The files are the user's global
+  // policies; that the cwd also points at them is incidental.
+  const projectScope: "project" | "user" = projectDir === customPoliciesDir() ? "user" : "project";
+  if (conventionEnabled) {
+    void sweepStaleTmpArtifacts(projectDir);
+    warnSkippedPolicyFiles(projectDir, projectScope);
+  }
+  // The shim directory leaks the same way and is swept on the same terms. It is
+  // ours alone and outside the policy tree, so nothing else would ever reap it;
+  // the age gate is what keeps this from removing a shim another process is
+  // still importing.
+  void sweepStaleTmpArtifacts(shimsDir());
+  const projectFiles = conventionEnabled
+    ? discoverPolicyFiles(projectDir).filter((f) => !loadedPaths.has(f))
+    : [];
   for (const file of projectFiles) {
+    loadedPaths.add(file);
     const hooksBefore = getCustomHooks().length;
-    await loadSingleFile(file, { conventionScope: "project" });
+    await loadSingleFile(file, { conventionScope: projectScope });
     const newHooks = getCustomHooks().slice(hooksBefore);
+    for (const hook of newHooks) {
+      (hook as CustomHook & { __policyId?: string }).__policyId = conventionPolicyId(projectScope, basename(file), hook.name);
+    }
     if (newHooks.length > 0) {
       conventionSources.push({
-        scope: "project",
+        scope: projectScope,
         file: basename(file),
         hookNames: newHooks.map((h) => h.name),
       });
@@ -233,13 +493,36 @@ export async function loadAllCustomHooks(
   }
 
   // 3. User convention: ~/.failproofai/policies/*policies.{js,mjs,ts}
-  const userDir = resolve(homedir(), ".failproofai", "policies");
-  if (conventionEnabled) warnSkippedPolicyFiles(userDir, "user");
-  const userFiles = conventionEnabled ? discoverPolicyFiles(userDir) : [];
+  //
+  // Skipped entirely when it resolves to the directory already loaded above —
+  // which happens whenever the project root IS the home directory, a normal
+  // setup for a gateway. Without this, every file is loaded a second time and
+  // `customPolicies.add` (an unconditional push) registers each hook twice, so
+  // every policy fires twice per event. For a counting policy that means the
+  // count doubles and its ceiling trips at half the real number.
+  //
+  // Today that is masked by the runtime rather than prevented: Bun caches
+  // dynamic imports by resolved path and IGNORES the `?v=` cache-buster below,
+  // so the second import is a no-op — but Node honours the query and would
+  // double-register. The binary runs under Bun and the tests under Node, so the
+  // bug is invisible from both sides. Do not rely on that; dedupe the paths.
+  const userDir = customPoliciesDir();
+  if (conventionEnabled && userDir !== projectDir) {
+    void sweepStaleTmpArtifacts(userDir);
+    warnSkippedPolicyFiles(userDir, "user");
+  }
+  const userFiles =
+    conventionEnabled && userDir !== projectDir
+      ? discoverPolicyFiles(userDir).filter((f) => !loadedPaths.has(f))
+      : [];
   for (const file of userFiles) {
+    loadedPaths.add(file);
     const hooksBefore = getCustomHooks().length;
     await loadSingleFile(file, { conventionScope: "user" });
     const newHooks = getCustomHooks().slice(hooksBefore);
+    for (const hook of newHooks) {
+      (hook as CustomHook & { __policyId?: string }).__policyId = conventionPolicyId("user", basename(file), hook.name);
+    }
     if (newHooks.length > 0) {
       conventionSources.push({
         scope: "user",

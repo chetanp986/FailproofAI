@@ -11,10 +11,9 @@
  * makes navigating back to /audit instant without re-running.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { homedir } from "node:os";
 import { writeJsonAtomically } from "../../lib/atomic-write";
 import type { AuditResult, RunAuditOptions } from "./types";
+import { auditDashboardFile } from "../hooks/fp-home";
 
 const DEFAULT_MAX_AGE_MINUTES = 30;
 
@@ -50,7 +49,7 @@ export interface DashboardCacheEntry {
 }
 
 function getCachePath(): string {
-  return join(homedir(), ".failproofai", "audit-dashboard.json");
+  return auditDashboardFile();
 }
 
 /** Read the cache file. Returns null on missing/corrupt/unreadable file —

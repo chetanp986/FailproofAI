@@ -1,33 +1,33 @@
 ---
 title: "Uyarılar"
-description: "Müşterilerinizden haber almak yerine, sınırınızı aştığı anda, ekibinizin zaten izlediği kanalda öğrenin."
+description: "Müşterinizden duyar duymaz, ekibinizin zaten izlediği kanala bir şey limitinizi aşan an da haberi alın."
 ---
 
 
-Müşterilerinizden haber almak yerine, sınırınızı aştığı anda, ekibinizin zaten izlediği kanalda öğrenin. Kuralı bir kez ayarlayın ve Failproof AI Observability bunu zamanlamaya göre kontrol etsin, ardından sizi e-posta, Slack, webhook aracılığıyla veya doğrudan panoda uyarsın.
+Müşterinizden duyar duymaz, ekibinizin zaten izlediği kanala bir şey limitinizi aşan an da haberi alın. Kuralı bir kez ayarlayın ve Failproof AI Observability bunu düzenli olarak kontrol etsin, sonra sizi e-posta, Slack, webhook veya doğrudan panoda bildirsin.
 
-![Uyarılar sayfası: her biri tetikleyicisini, değerlendirme penceresini, kanallarını ve bilgi, uyarı veya kritik önem rozeti gösteren bir uyarı kuralı kartları ızgarası](/agenteye/images/alerts.png)
-*Her uyarı kuralını bir bakışta: neyi izlediği, ne sıklıkla, nereye uyardığı ve ne kadar acil olduğu.*
+![Uyarılar sayfası: her biri tetikleyicisini, değerlendirme penceresini, kanallarını ve bilgi, uyarı veya kritik öncelik rozetini gösteren uyarı kuralı kartlarının ızgarası](/agenteye/images/alerts.png)
+*Her uyarı kuralı bir bakışta: neyi izliyor, ne sıklıkta, nereye bildiriyor ve ne kadar acil.*
 
-## Kullanıcılarınız haberdar olmadan önce sorunları öğrenin
+## Kullanıcılarınız bilmeden sorunları öğrenin
 
-Bir regresyonu yakalamayı umarken paneli tazelemekten vazgeçin. Hiç kimse bakmıyor olsa bile duymak isteyeceğiniz bir sinyal olduğunda bir uyarıya ulaşın ve zaten bulunduğunuz yere iletilsin:
+Bir regresyonu yakalamak için panoyu sürekli yenilemeyi bırakın. Hiç kimse bakmıyorken bile duymanız gereken bir sinyal olduğunda bir uyarıya başvurun ve bunu zaten bulunduğunuz yere iletişim kurun:
 
 - **E-posta**, bilmesi gereken herkese.
-- **Slack**, olaya doğrudan götüren bir düğme içeren zengin bir mesaj.
-- **Webhook**, PagerDuty, Opsgenie veya kendi uç noktanız için JSON POST; alıcının güvenebilmesi için isteğe bağlı bir imza.
-- **Panoda**, tasarımı gereği sessiz; bir kuralı ayarlarken ve henüz kimseyi uyarmak istemiyorsanız.
+- **Slack**, olayın tam bulunduğu noktaya atlayan düğmeli zengin bir mesaj.
+- **Webhook**, PagerDuty, Opsgenie veya kendi uç noktanız için, alıcının buna güvenebilmesi için isteğe bağlı imzalı JSON POST.
+- **Panoda**, sessiz tasarımla, bir kuralı ayarlarken henüz kimseyi bildirmek istemediğiniz zamanlar için.
 
-Herhangi bir kombinasyonu tek bir kurala ekleyin ve önem derecesi (bilgi, uyarı veya kritik) beraberinde gelir, böylece acil olanlar acil görünür.
+Herhangi bir kombinasyonu tek bir kurala ekleyin ve önem derecesi (bilgi, uyarı veya kritik) o kuralla beraber gider, böylece acil olanlar acil görünür.
 
-## Kuralı JSON değil, bir formda oluşturun
+## Kuralı JSON değil, formda oluşturun
 
-"Bozuk" anlamını bir formda tanımlayın ve Failproof AI Observability temel kuralı sizin için yazacak. JSON spesifikasyonu sadece o formun altında ürettiği şeydir, bu nedenle bir kuralı anlamak için okuyabilirsiniz ancak nadiren yazarsınız.
+Bir formda "bozuk" demek ne anlama geldiğini açıklayın ve Failproof AI Observability size altında yatan kuralı yazacak. JSON özellikleri sadece o formun altında ürettiği şeydir, bu nedenle onu okuyarak bir kuralı anlayabilirsiniz ama nadiren yazarsınız.
 
-![Yeni uyarı formu: ad ve açıklama, etkin geçişi ve metrik eşik, özel SQL, değerlendirme puanı, bileşik eval ve etkinlik başına koşullar sunan bir tetikleyici seçiciyi gösteren form](/agenteye/images/alert-new.png)
-*Bir tetikleyici seçin ve form doğru alanları gösterir; Kaydet kuralı yazar.*
+![Yeni uyarı formu: ad ve açıklama, etkinleştirme geçişi ve metrik eşiği, özel SQL, değerlendirme puanı, bileşik değerlendirme ve etkinlik başına koşullar sunan tetikleyici seçici](/agenteye/images/alert-new.png)
+*Bir tetikleyici seçin ve form doğru alanları değiştirir; Kaydet kuralı yazar.*
 
-Mutlu yol hızlıdır: adlandırın, bir **tetikleyici** seçin (neyi izleyeceğini), **eşik ve pencereyi** ayarlayın (ne kadar kötü, ne kadar süre), en az bir **kanal** ekleyin, ardından **Kaydet** ve **Test** tuşuna basın; sentetik bir bildirim gönderin ve her hedefin bağlı olduğundan emin olun. Altında şöyle küçük bir spesifikasyon üretilir:
+Mutlu yol hızlıdır: adını verin, bir **tetikleyici** seçin (neyi izleyeceğiniz), **eşik ve pencereyi** ayarlayın (ne kadar kötü, ne kadar süre), en az bir **kanal** ekleyin, sonra **Kaydet** yapın ve her hedefin bağlı olduğunu doğrulamak için **Test** e tıklayarak sentetik bir bildirim gönderin. Altında buna benzer küçük bir spec üretir:
 
 ```json
 { "metric": "p95_latency_ms", "op": ">", "value": 5000, "window_secs": 900 }
@@ -35,29 +35,29 @@ Mutlu yol hızlıdır: adlandırın, bir **tetikleyici** seçin (neyi izleyeceğ
 
 Bir sinyal türüyle sınırlı değilsiniz. Hatayı nasıl düşündüğünüzle eşleşen tetikleyiciyi seçin:
 
-| Tetikleyici | Şu zaman ateşlenir |
+| Tetikleyici | Ateşlenir |
 |---|---|
-| **Metrik eşik** | ön ayarlı bir metrik (hata oranı, p95 veya p99 gecikmesi, olay veya hata sayıları, token harcaması) bir pencere içinde sınırınızı aştığında |
-| **Özel SQL** | sadece okunabilir sorgunuz bir satır döndürdüğünde veya hesapladığı bir değer bir eşiği aştığında |
-| **Değerlendirme puanı** | bir değerlendiricinin puanının ortalaması (örneğin, halüsinasyon) bir eşiği aştığında |
-| **Bileşik eval** | birkaç puan kontrolü, herhangi biri, tümü veya en az N mantığıyla birleşerek, yalnızca puanlar arasında görünen bir regresyonu yakalaydığında |
-| **Etkinlik başına** | eşleşen tek bir olay geldiğinde: belirli bir agent, belirli bir hata türü veya bir ileti alt dizesi |
+| **Metrik eşiği** | önceden ayarlanmış bir metrik (hata oranı, p95 veya p99 gecikmesi, olay veya hata sayıları, token harcaması) bir pencere üzerinde limitinizi aştığında |
+| **Özel SQL** | kendi salt okunur sorgunuz bir satır döndürdüğünde veya hesapladığı bir değer eşiği aştığında |
+| **Değerlendirme puanı** | bir değerlendirici puanının ortalaması (örneğin, halüsinasyon) eşiği aştığında |
+| **Bileşik değerlendirme** | birkaç puan kontrolü herhangi, tümü veya en az N mantığıyla birleştirilir, yalnızca puanlar arasında görünen bir regresyonu yakalaması için |
+| **Etkinlik başına** | eşleşen tek bir olay gelir: belirli bir ajan, belirli bir hata türü veya bir mesaj alt dizesi |
 
-Zaten [Hatalar sayfasında](/tr/agenteye/error-tracking) bir hataya bakıyor musunuz? Oradaki her satırın bu tam formu önceden doldurulmuş olarak açan bir **+ uyarı** düğmesi vardır, bu nedenle az önce sınıflandırdığınız olay bir sonraki sefer sizi sayfayan olay olur.
+Zaten [Hatalar sayfasında](/tr/agenteye/error-tracking) bir hataya bakıyor musunuz? Oradaki her satırın bu aynı formu tam olarak şu hatayı yakalamak için önceden doldurmuş bir **+ uyarı** düğmesi vardır, bu nedenle az önce triajladığınız olay bir sonraki seferde sizi bildiren olur.
 
-**Bulunduğu yer:** Uyarılar `/<org-slug>/alerts` konumunda bulunur. Kuralları oluşturma, düzenleme, silme ve test etme **`alerts:write`** gerektirir; `alerts:read` yalnızca bakmak için yeterlidir. Alıcı seçici, kuruluşunuzun üyelerini ada göre listeler, bu nedenle formu kullanmadan bir kişiyi uyarabilirsiniz.
+**Nerede bulunur:** Uyarılar `/<org-slug>/alerts` adresinde bulunur. Kurallar oluşturmak, düzenlemek, silmek ve test etmek **`alerts:write`** gerektirir; bakmak için `alerts:read` yeterlidir. Alıcı seçici kuruluşunuzun üyelerini ad ile listeler, bu nedenle formu bırakmadan bir kişiyi bildirebilirsiniz.
 
-## Beni sadece gerçek olduğunda uyar
+## Beni sadece gerçek olduğunda bildirin
 
-Bir kötü ölçüm sizi uyandırmamalı. **M of N** gürültü filtresi, uyarı gerçekten sizi uyarmadan önce son birkaç kontrolün kaç tanesinin başarısız olması gerektiğini kontrol eder. Bunu **3 of 5** olarak ayarlayın ve kural yalnızca son beş kontrolünün üçünü ihlal ettikten sonra ateşlenir, böylece titrek bir sinyal çok fazla uyarı vermez; varsayılan **1 of 1** olarak bırakın ilk ihlalde ateşlemek. Ayrıca kuralın ne sıklıkta çalışacağını seçersiniz; 1m, 5m, 15m ve 1h ön ayarlarından, sinyalin gerçekten ne kadar hızlı hareket ettiğine göre.
+Bir kötü ölçüm sizi uyandırmamalı. **M of N** gürültü filtresi, uyarının aslında sizi bildirmesinden önce son birkaç kontrolün kaçının başarısız olması gerektiğini denetler. Bunu **3 of 5** olarak ayarlayın ve kural sadece son beş kontrolünün üçünü ihlal ettikten sonra ateşlenir, bu nedenle titreşimli bir sinyal çığlık atmayı durdurur; ilk ihlali ateşlemek için varsayılan **1 of 1** de bırakın. Ayrıca kuralın ne sıklıkta çalışacağını da seçersiniz: 1m, 5m, 15m ve 1h ön ayarlarından, sinyalin gerçekten ne kadar hızlı hareket ettiğine göre eşleştirilmiştir.
 
 ## Bir uyarı ateşlendiğinde ne olur
 
-Bir ihlal bir **incident** açar ve kanallarınızı bir kez sayfalar. Buradan ekibiniz bunu onaylar, bir sahibi atar, konuşur ve çözümler; tümü temiz, atfedilen bir kayda karşı. Bu sınıflandırma iş akışının kendi evi vardır: [Incidents](/tr/agenteye/incidents) sayfasına bakın.
+Bir ihlal bir **olayı** açar ve kanallarınızı bir kez bildirir. Oradan ekibiniz bunu onaylar, sahibini atar, üzerinde tartışır ve temiz, atfedilmiş bir kayda karşı çözer. O triaj iş akışının kendi evi vardır: [Olaylar](/tr/agenteye/incidents) konusuna bakın.
 
 ## İlgili
 
-- [Incidents](/tr/agenteye/incidents): ateşlenen bir uyarıyı açılıştan onaylamaya kapatılmaya kadar izleyin.
-- [Hata izleme](/tr/agenteye/error-tracking): agent hatalarını gruplandırın ve bir tıklama ile birini uyarıya yükseltin.
-- [Panolar](/tr/agenteye/dashboards): uyarı verdiğiniz eşiklerin geldiği paylaşılan panoları izleyin.
-- [CLI ve agentler](/tr/agenteye/cli-and-agents): terminalinizden uyarılar oluşturun ve incidents onaylayın veya bunları CI'ye komut dosyası haline getirin.
+- [Olaylar](/tr/agenteye/incidents): ateşlenen bir uyarıyı açıktan onaylanana çözüme kadar izleyin.
+- [Hata izleme](/tr/agenteye/error-tracking): ajan hatalarını gruplandırın ve bir tıkla birini uyarıya yükseltin.
+- [Panolar](/tr/agenteye/dashboards): uyarıda bulunduğunuz eşiklerin geldiği paylaşılan panoları izleyin.
+- [CLI ve ajanlar](/tr/agenteye/cli-and-agents): terminalinizden uyarılar oluşturun ve olayları onaylayın veya CI'ye yazın.

@@ -1,23 +1,23 @@
 ---
-title: ביקורת על הפעלות קודמות (beta)
-description: "ספור כמה פעמים הסוכן עשה דברים מבוזבזים או מסוכנים על פני תמלילים קודמים"
+---
+title: 审计过去的会话 (beta)
+description: "统计代理在过去的文字记录中执行浪费或风险操作的频率"
 ---
 
 <Note>
-  **תכונת Beta.** הביקורת משתלחת כ-beta בעוד אנחנו אוספים משוב מוקדם.
-  הקטלוג של הגלאים וקבוצת הדוח עלולים להשתנות לפני החתך היציב הבא.
-  אנא פתח כתבה אם משהו נראה לא בסדר.
+  **Beta 功能。** 审计以 beta 版本发布，同时我们收集早期反馈。
+  检测器目录和报告格式在下一个稳定版本发布前可能会更改。如果您发现任何问题，请提交 issue。
 </Note>
 
-הביקורת משמרת מחדש את תמלילי agent-CLI שלך דרך מנוע המדיניות של failproofai וממציאה דוח חזותי שניתן לשיתוף בעמוד לוח המחוונים **`/audit`** — אתחול הסוכן שלך, ניקוד 0–100, ובדיוק אילו מדיניויות היו תופסות מה.
+审计通过 failproofai 的策略引擎重放您过去的代理 CLI 文字记录，并在 **`/audit` 仪表板页面** 上呈现可共享的可视化报告 — 您的代理的原型、0–100 分数，以及具体哪些策略会捕获什么。
 
-## הפעל אותו
+## 运行它
 
-שלוש דרכים פנימה — כולן נוחתות באותו דוח `/audit`.
+三种方式 — 都会转到同一个 `/audit` 报告。
 
 <CodeGroup>
 
-```bash npx (ללא התקנה)
+```bash npx (no install)
 npx -y failproofai audit
 ```
 
@@ -25,69 +25,92 @@ npx -y failproofai audit
 failproofai audit
 ```
 
-```bash failproofai (לוח מחוונים)
+```bash failproofai (dashboard)
 failproofai
 ```
 
 </CodeGroup>
 
 <CardGroup cols={3}>
-  <Card title="ללא התקנה" icon="bolt">
-    `npx -y failproofai audit` מביא את failproofai, מריץ את הסריקה, ופותח את
-    לוח המחוונים עבורך — אין צורך בהתקנה מראש.
+  <Card title="无需安装" icon="bolt">
+    `npx -y failproofai audit` 获取 failproofai、运行扫描，并为您打开仪表板 — 无需事先安装任何内容。
   </Card>
-  <Card title="מקו הפקודה" icon="terminal">
-    `failproofai audit` מריץ את הסריקה בטרמינל שלך, ואז פותח באופן אוטומטי
-    את `localhost:8020/audit` כאשר זה מסתיים.
+  <Card title="从 CLI 运行" icon="terminal">
+    `failproofai audit` 在终端中运行扫描，然后在完成时自动打开 `localhost:8020/audit`。
   </Card>
-  <Card title="מלוח המחוונים" icon="gauge">
-    הרץ את `failproofai` ולחץ על **Audit** בסרט הניווט (בין Policies
-    ו-Projects), או פתח את `/audit` ישירות.
+  <Card title="从仪表板运行" icon="gauge">
+    运行 `failproofai` 并在导航栏中点击 **Audit**（位于"策略"和"项目"之间），或直接打开 `/audit`。
   </Card>
 </CardGroup>
 
 <Tip>
-  הרץ את `failproofai audit -h` (או `--help`) כדי לראות שימוש. הביקורת פועלת **לחלוטין
-  במצב לא מקוון** — אין צורך בחשבון או ברשת — ולוח המחוונים ממשיך לשרת
-  עד שתעצור אותו עם `Ctrl+C`.
+  运行 `failproofai audit -h`（或 `--help`）查看使用方法。审计 **完全离线运行** — 无需账户或网络 — 仪表板将一直提供服务，直到您用 `Ctrl+C` 停止它。
 </Tip>
 
-לוח המחוונים סורק תמלילי agent CLI קודמים במכונה זו (Claude Code, Codex, Copilot, Cursor, OpenCode, Pi) ודיווח כמה פעמים הסוכן עשה דברים שמבנה failproofai כדי לעצור — בדיקות משתנות סביבה, כפיות דחיפה, קידומות `cd <cwd>` מיותרות, לולאות sleep-polling, קריאה חוזרת של קבצים שנערכו זה עתה, ועוד.
+仪表板扫描这台机器上的过去代理 CLI 文字记录（Claude Code、Codex、Copilot、Cursor、OpenCode、Pi），并报告代理执行 failproofai 被构建用来阻止的操作的频率 — 环境变量检查、强制推送、冗余的 `cd <cwd>` 前缀、睡眠轮询循环、重新读取刚编辑的文件等。
 
-לכל תמליל, כל אירוע tool-use משמר מחדש דרך 39 המדיניויות המובנות **וגם** דרך 8 גלאים audit-only שתופסים דפוסים שעדיין לא מכוסים על ידי מדיניויות זמן ריצה. הספירות מצטברות לכל מדיניות / גלאי על פני כל הפעלות.
+对于每个文字记录，每个工具使用事件都会通过 39 个内置策略 **以及** 8 个仅审计检测器重放，这些检测器捕获运行时策略尚未覆盖的模式。计数会跨所有会话按策略/检测器聚合。
 
-## מה אתה מקבל
+## 您获得什么
 
-עמוד `/audit` הוא כרזה של מסך יחיד שניתן לשיתוף ואחריו ארבע חלקים מתחת לקפל:
+`/audit` 页面是一个单屏、可共享的 **海报**，后面跟着四个下方部分：
 
-1. **כרזה** — זהות הסוכן שלך במבט חטוף: שלו **archetype** (אחד מ-8 — `optimist`, `cowboy`, `explorer`, `goldfish`, `paranoid architect`, `precision builder`, `hammer`, `ghost`), מילות המפתח של הפרסונה שלו, כמה נדיר האתחול הזה, וניקוד **0–100** עם רצועת שכבה (`S` עד `bottom tier`). בנוי לשיתוף — פוסט ל-X או LinkedIn, או הורד אותו כ-PNG.
-2. **`// strengths`** — מה הסוכן שלך כבר עושה טוב, כמספרים אמיתיים מהסריקה (למשל clean-tool-call %, `0` push-to-main attempts), מוצג רק כאשר למדיניות הרלוונטית יש רשומה נקייה.
-3. **`// quirks`** — מה התפזר: טבלה דורגת של התנהגויות shes failproofai היה תופס — *מתי* זה קרה לאחרונה, *מה התפזר* (וה-builtin שהיה חוסם אותו), שלו *severity*, וכמה פעמים זה היה *seen* (`new` / `recurring` / `N× seen`).
-4. **`// how to improve`** — רשימת התיקון הקבוע: שורה אחת לכל מדיניות עם `failproofai policy add <slug>` העתקה-הדבק, ובנוסף כפתור **install all** שמאפשר כל המלצה בבת אחת ומציג את **projected score** שלך אם עשית.
-5. **`// come back better`** — בנה את ההרגל: הגדר דוא"ל לביקורת חוזרת **reminder** (`3d` / `7d` / `14d` / `30d`) או biקורת כעת, והזמן **invite a friend** להפעיל ביקורת משלהם (נשלח מ-failproof.ai, Cc'd אליך). תזכורות והזמנות דורשות כניסה — ראה [`failproofai auth`](/he/cli/auth).
+1. **海报** — 一览您的代理标识：其 **原型**（8 种之一 — `optimist`、`cowboy`、`explorer`、`goldfish`、`paranoid architect`、`precision builder`、`hammer`、`ghost`）、其角色关键字、该原型的罕见程度，以及一个带等级带的 **0–100 分数**（`S` 到 `bottom tier`）。为了便于分享而构建 — 发布到 X 或 LinkedIn，或将其下载为 PNG。
+2. **`// strengths`** — 您的代理已经做得很好的地方，作为来自扫描的真实数字（例如 clean-tool-call %、`0` push-to-main 尝试），仅在相关策略有清晰记录的地方显示。
+3. **`// quirks`** — 滑过的内容：failproofai 会捕获的行为的排名表 — *最后发生的时间*、*滑过的内容*（以及会阻止它的内置程序）、其 *严重程度*，以及 *看到* 它的频率（`new` / `recurring` / `N× seen`）。
+4. **`// how to improve`** — 推荐的修复列表：每个策略一行，包含可复制粘贴的 `failproofai policy add <slug>`，加上一个 **install all** 按钮，可一次启用每项建议并显示您的 **projected score**。
+5. **`// come back better`** — 养成习惯：设置重新审计电子邮件 **提醒**（`3d` / `7d` / `14d` / `30d`）或立即重新审计，以及 **邀请朋友** 运行他们自己的审计（从 failproof.ai 发送，抄送给您）。提醒和邀请需要登录。
 
-## גלאים audit-only בלבד
+## 计划审计
 
-אלה תופסים דפוסי התנהגות "stupid behavior" שאינם (עדיין) מאולצים בזמן אמת. הם פועלים רק במהלך הביקורת ולעולם לא חוסמים קריאת כלי חי.
+如果您运行 **failproofaid 守护进程**（请参阅 [`failproofai config`](/he/cli/install-policies)），
+它可以为您按计划重新运行审计，并在后台刷新 `/audit` 报告。
+它 **默认关闭**，因为扫描会读取这台机器上每个代理会话文字记录的 *内容* — 在您要求之前，没有任何内容在计时器上扫描。
 
-| גלאי | מה זה סופר |
+在 `~/.failproofai/config.toml` 中将其打开：
+
+```toml
+[audit]
+auto = true
+interval_days = 7
+```
+
+| 键 | 含义 |
 |---|---|
-| `redundant-cd-cwd` | פקודות Bash המתחילות ב-`cd <cwd> && …` למרות שפקודות כבר פועלות ב-`cwd`. |
-| `prefer-edit-over-read-cat` | `cat`/`head`/`tail`/`less`/`more` בקובץ מקור יחיד — השתמש בכלי `Read`. |
-| `prefer-edit-over-sed-awk` | `sed -i` / `awk … > file` עריכות במקום — השתמש בכלי `Edit`. |
-| `prefer-write-over-heredoc` | Heredoc / `echo > file` רב-שורות כתיבת קבצים — השתמש בכלי `Write`. |
-| `sleep-polling-loop` | `sleep N` ארוך (≥ 30s) או לולאות polling `while …; sleep …; done`. |
-| `find-from-root` | `find /`, `find /home`, `find /usr`, וכו' — שדה ל-`cwd` במקום. |
-| `git-commit-no-verify` | `git commit … --no-verify` / `-n`, דילוג על ווקפים. |
-| `reread-after-edit` | `Read` של קובץ שנערך זה עתה `Edit`/`Write` באותה הפעלה. |
+| `auto` | `true` 启用计划扫描。任何其他内容 — 缺失、`false`、`"yes"` — 均为关闭。 |
+| `interval_days` | 扫描之间的天数。限制为 1–90；`0`、负数或非数字返回默认值 `7`。 |
 
-## קשיים
+- 计划是 **挂钟时间**，所以它能在暂停和重启后继续：睡眠时间超过到期时间的笔记本电脑在唤醒时 **运行一次**，永远不会出现积压。
+- 每次运行都是一个独立的低优先级（`nice 19`）进程 — 永远不是守护进程的钩子路径，该路径保持空闲以响应工具调用。
+- 如果 `failproofai audit` 或仪表板的重新运行已在进行中，则会跳过扫描；此后不久会重试，而不是被视为失败。
+- 进度被写入 `~/.failproofai/state/audit-schedule.json`（上次运行、下次到期）。守护进程拥有该文件 — 在 `config.toml` 中更改节奏。
 
-- **Per-transcript cache** ב-`~/.failproofai/cache/audit/<sha1>.json` מפותח על ידי `(mtime, size, engineVersion, detectorVersion)` — מבטל באופן אוטומטי כאשר התמליל או קוד המדיניות/הגלאי משתנה. כל ערך גם אחסן חותמת זמן `cachedAt` כ**metadata TTL** (לא חלק ממפתח המטמון); ערכים ישנים יותר מ**7 ימים** נדחים בקריאה כך שתוצאות חיות ארוכות לא חיות מעבר לכוונון הגלאים.
-- **Whole-result cache** ב-`~/.failproofai/audit-dashboard.json` (mode 0600). מאפשר ללוח המחוונים להעניק דוח מיידי בניווט מבלי להפעיל מחדש. גם נדחה בקריאה בעבר ה-**7-day TTL** — `/audit` ואז נופל דרך מצב הריק שלו ומזמין ריצה טרייה. לחץ על `[ re-audit now ]` בקרבת התחתון של הדוח כדי לרענן — re-audit שולח `noCache: true`, כך שהוא עוקף את המטמון per-transcript וסורק מחדש כל תמליל במקום להחזיר את התוצאה המטומנה; הריצה זורמת התקדמות דרך רצועה דבקה עליונה ומחליפה את התוצאה במקום בהצלחה (אין טעינת דף מחדש; re-audit כושל שומר על הדוח הקודם).
+<Note>
+如果您在由较早版本的 failproofai 设置的机器上启用了此功能，请运行一次 `failproofai config`。守护进程的服务定义在启动 CLI 之前需要一个额外的条目，该刷新是该命令的一部分。
+</Note>
 
-## הערות
+## 仅审计检测器
 
-- **ללא תמורה.** הביקורת משמרת במצב קריאה בלבד. `warn-repeated-tool-calls` מדולל מכיוון שה-sidecar לפי הפעלה שלו אחרת היה משתנה.
-- **מדיניויות זרימת עבודה דלוגות.** `require-*-before-stop` מדיניויות יורים רק על אירועי `Stop` ו-`execSync` כנגד מצב git חי — להם אין פרשנות משמעותית של "מה היה קורה ב-2025", כך שהם לא מופיעים בספירות הביקורת.
-- **מדיניויות מותאמות אישית דלוגות.** וו קסטום המסופק על ידי המשתמש אינו משמר מחדש (הם עלולים להשתנות מאז הפעלה מקורית).
+这些检测"愚蠢行为"模式，这些模式（尚）未在实时中执行。它们仅在审计期间运行，永远不会阻止实时工具调用。
+
+| 检测器 | 它计数的内容 |
+|---|---|
+| `redundant-cd-cwd` | 以 `cd <cwd> && …` 开头的 Bash 命令，即使命令已在 `cwd` 中运行。 |
+| `prefer-edit-over-read-cat` | 单个源文件上的 `cat`/`head`/`tail`/`less`/`more` — 使用 `Read` 工具。 |
+| `prefer-edit-over-sed-awk` | `sed -i` / `awk … > file` 就地编辑 — 使用 `Edit` 工具。 |
+| `prefer-write-over-heredoc` | Heredoc / 多行 `echo > file` 写入文件 — 使用 `Write` 工具。 |
+| `sleep-polling-loop` | 长 `sleep N`（≥ 30s）或 `while …; sleep …; done` 轮询循环。 |
+| `find-from-root` | `find /`、`find /home`、`find /usr` 等 — 改为限制在 `cwd`。 |
+| `git-commit-no-verify` | `git commit … --no-verify` / `-n`，跳过钩子。 |
+| `reread-after-edit` | `Read` 在同一会话中刚刚被 `Edit`/`Write` 的文件。 |
+
+## 缓存
+
+- **按文字记录缓存** 位于 `~/.failproofai/cache/audit/<sha1>.json`，由 `(mtime, size, engineVersion, detectorVersion)` 作为键 — 当文字记录或策略/检测器代码更改时自动失效。每个条目还存储一个 `cachedAt` 时间戳作为 **TTL 元数据**（不是缓存键的一部分）；超过 **7 天** 的条目在读取时被拒绝，以便长期结果不会超过不断演变的检测器意图。
+- **整体结果缓存** 位于 `~/.failproofai/audit-dashboard.json`（mode 0600）。让仪表板在导航时立即呈现，无需重新运行。在读取超过 **7 天 TTL** 时也会被拒绝 — `/audit` 然后下降到其空状态并提示进行新的运行。点击报告底部附近的 `[ re-audit now ]` 刷新 — 重新审计发送 `noCache: true`，因此它绕过按文字记录缓存并重新扫描每个文字记录，而不是返回缓存结果；运行通过粘性顶部条纹流式传输进度，并在成功时就地交换结果（无页面重新加载；失败的重新审计保留之前的报告）。
+
+## 注意
+
+- **无变动。** 审计以只读模式重放。`warn-repeated-tool-calls` 被跳过，因为其按会话的伴侣文件会被修改。
+- **工作流策略被跳过。** `require-*-before-stop` 策略仅在 `Stop` 事件和对实时 git 状态的 `execSync` 上触发 — 它们没有有意义的"2025 年会发生什么"解释，所以它们不会出现在审计计数中。
+- **自定义策略被跳过。** 用户提供的自定义钩子不会重放（它们自原始会话以来可能已更改）。

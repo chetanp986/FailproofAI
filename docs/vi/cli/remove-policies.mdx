@@ -1,43 +1,43 @@
 ---
-title: Gỡ cài đặt chính sách
-description: "Xoá các mục hook từ cài đặt Claude Code"
+title: Gỡ cài đặt policies
+description: "Xóa các hook entries từ settings của Claude Code"
 ---
 
 ```bash
 failproofai policies --uninstall [policy-names...] [options]
 ```
 
-Xoá các mục hook của failproofai từ `settings.json` của Claude Code.
+Xóa các hook entries của failproofai từ `settings.json` của Claude Code.
 
 Bí danh: `failproofai p -u`
 
-## Các tùy chọn
+## Options
 
-| Cờ | Mô tả |
+| Flag | Description |
 |------|-------------|
-| `--scope user` | Xoá từ cài đặt toàn cục (mặc định) |
-| `--scope project` | Xoá từ cài đặt dự án |
-| `--scope local` | Xoá từ cài đặt cục bộ |
-| `--scope all` | Xoá từ tất cả các phạm vi cùng một lúc |
-| `--custom` / `-c` | Xoá `customPoliciesPath` khỏi cấu hình |
+| `--scope user` | Xóa từ cài đặt toàn cục (mặc định) |
+| `--scope project` | Xóa từ cài đặt dự án |
+| `--scope local` | Xóa từ cài đặt cục bộ |
+| `--scope all` | Xóa từ tất cả các phạm vi cùng một lúc |
+| `--custom` / `-c` | Xóa `customPoliciesPath` khỏi cấu hình |
 
-## Hành vi
+## Behavior
 
-- **Không có tên chính sách** - xoá tất cả các mục hook của failproofai khỏi tệp cài đặt
-- **Tên cụ thể** - vô hiệu hoá những chính sách đó nhưng giữ lại các hook đã cài đặt
+- **Không có tên policy** - xóa tất cả các hook entries của failproofai khỏi tệp cài đặt
+- **Tên cụ thể** - vô hiệu hóa các policies đó nhưng giữ nguyên hooks được cài đặt
 
-## Ví dụ
+## Examples
 
 ```bash
-# Remove all hooks globally
+# Xóa tất cả hooks toàn cục
 failproofai policies --uninstall
 
-# Disable a specific policy (keeps hooks installed)
+# Vô hiệu hóa một policy cụ thể (giữ nguyên hooks được cài đặt)
 failproofai policies --uninstall block-sudo
 
-# Remove hooks from every scope
+# Xóa hooks từ mọi phạm vi
 failproofai policies --uninstall --scope all
 
-# Clear custom policies path
+# Xóa đường dẫn custom policies
 failproofai policies --uninstall --custom
 ```

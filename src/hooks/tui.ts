@@ -34,6 +34,8 @@ export interface SelectChoice<T> {
 }
 
 export interface SelectOneOptions<T> {
+  /** Offer ← to go back a step. The caller must handle `BACK`. */
+  allowBack?: boolean;
   message: string;
   choices: SelectChoice<T>[];
   /** Static info lines rendered under the question (e.g. a review summary). */
@@ -64,6 +66,24 @@ export interface MultiChoice<T> {
 }
 
 export interface MultiSelectOptions<T> {
+  /** Offer ← to go back a step. The caller must handle `BACK`. */
+  allowBack?: boolean;
+  /**
+   * Called with what was ticked at the moment ← was pressed.
+   *
+   * `BACK` is a symbol, so it cannot carry a value, and the selection lives in a
+   * local array here rather than on the caller's choice objects — so a caller had
+   * no way to learn what a user had toggled before stepping back. The wizard's
+   * harness step needs exactly that: without it, deselecting a CLI and pressing ←
+   * discards the deselection, the step is redrawn from the detected defaults, and
+   * confirming re-enables hook installation for a CLI the user explicitly turned
+   * off.
+   *
+   * OPTIONAL and additive rather than a change to the return type: `BACK` is
+   * shared with `selectOne` and every other caller, and widening that contract to
+   * fix one step's state would be a much larger surface than the bug.
+   */
+  onBack?: (checkedNow: T[]) => void;
   message: string;
   choices: MultiChoice<T>[];
   minSelected?: number;
@@ -112,10 +132,10 @@ export function colorsEnabled(out: TTYOut): boolean {
 
 /**
  * The raw ANSI opening sequence for a brand role, for callers that assemble
- * their own strings instead of using `paint()`'s wrappers (`src/audit/cli.ts`,
- * `src/auth/cli.ts`). Those files previously hardcoded their own 256-colour
- * palette — a green and a blue that appear nowhere in the brand — so `audit`
- * and `auth` looked like different products from `config`. Routing them here
+ * their own strings instead of using `paint()`'s wrappers (`src/audit/cli.ts`).
+ * That file previously hardcoded its own 256-colour palette — a green and a
+ * blue that appear nowhere in the brand — so `audit` looked like a different
+ * product from `config`. Routing it here
  * keeps HUES the single source of truth: change a hue once and every surface
  * follows. Emits truecolor where the terminal advertises it, basic ANSI
  * otherwise; the caller still decides *whether* to colour at all.
@@ -423,6 +443,10 @@ interface PromptSpec<R> {
   renderRow: (index: number, active: boolean, budget: number) => string;
   /** Extra line(s) above the footer (e.g. a min-selected warning). */
   warnLine?: () => string | null;
+  /** When set, ← resolves `BACK` so the caller can step backwards. */
+  allowBack?: boolean;
+  /** Called just before ← resolves, so a caller can keep in-progress state. */
+  onBack?: () => void;
   footer: string;
   /** Handle non-navigation keys. `{done}` finishes, `"redraw"` repaints. */
   onKey: (key: readline.Key, cursor: number) => { done: R } | "redraw" | undefined;
@@ -469,10 +493,21 @@ function runPrompt<R>(p: PromptSpec<R>): Promise<R | null> {
   };
 
   const collapse = (result: R | null): void => {
+    // BACK is handled HERE, not in each `summaryFor`, because it is not a value
+    // of `R` at all — it is a sentinel the shared key handler injects, so every
+    // prompt would otherwise have to know about a symbol it never declared.
+    //
+    // Both existing callers got it wrong in different ways, and one of them
+    // hung: `multiSelect`'s summary calls `values.includes(...)`, which throws
+    // `TypeError` on a symbol — and it throws INSIDE `finish`, before
+    // `resolve(result)`, so pressing ← never settled the promise and the wizard
+    // stopped responding entirely. `selectOne` fell through to `String(value)`
+    // and rendered the literal text `Symbol(failproofai.back)`.
+    const summary = (result as unknown) === BACK ? "back" : p.summaryFor(result);
     repaint(stdout, region, [
       c.dim(BAR),
       `${c.dim(STEP_DONE)}  ${p.message}`,
-      `${c.dim(BAR)}  ${c.dim(p.summaryFor(result))}`,
+      `${c.dim(BAR)}  ${c.dim(summary)}`,
     ]);
   };
 
@@ -500,6 +535,15 @@ function runPrompt<R>(p: PromptSpec<R>): Promise<R | null> {
       if (!key) return;
       if ((key.ctrl && (key.name === "c" || key.name === "d")) || key.name === "escape") {
         finish(null);
+      } else if (key.name === "left" && p.allowBack) {
+        // Only when the caller opted in. A prompt with nowhere to go back TO
+        // must not appear to offer it.
+        //
+        // Reported BEFORE finishing, because `finish` collapses the prompt and
+        // resolves — after that the selection is gone and the caller is already
+        // running.
+        p.onBack?.();
+        finish(BACK as unknown as never);
       } else if (key.name === "up") {
         cursor = cursor > 0 ? cursor - 1 : choices.length - 1;
         repaint(stdout, region, build());
@@ -519,7 +563,24 @@ function runPrompt<R>(p: PromptSpec<R>): Promise<R | null> {
 
 // ── selectOne (radio) ─────────────────────────────────────────────────────────
 
-export function selectOne<T>(opts: SelectOneOptions<T>): Promise<T | null> {
+/**
+ * Returned by a prompt when the user asked to go BACK a step, as distinct from
+ * cancelling. Both used to be `null`, which made "I picked the wrong scope" and
+ * "I want out" the same keystroke — so the only way to change an earlier answer
+ * was to abandon setup and start over.
+ *
+ * A symbol rather than a sentinel string because a caller's value type is its
+ * own: `selectOne<string>` could legitimately have "back" as a real choice.
+ */
+export const BACK: unique symbol = Symbol("failproofai.back");
+export type Back = typeof BACK;
+
+// Overloaded so `BACK` appears in the return type ONLY where it was asked for.
+// Widening every caller to `T | Back | null` would make dozens of call sites
+// handle a value they can never receive.
+export function selectOne<T>(opts: SelectOneOptions<T> & { allowBack: true }): Promise<T | Back | null>;
+export function selectOne<T>(opts: SelectOneOptions<T>): Promise<T | null>;
+export function selectOne<T>(opts: SelectOneOptions<T>): Promise<T | Back | null> {
   const stdin: TTYIn = opts.stdin ?? process.stdin;
   const stdout: TTYOut = opts.stdout ?? process.stdout;
   const choices = opts.choices;
@@ -550,7 +611,10 @@ export function selectOne<T>(opts: SelectOneOptions<T>): Promise<T | null> {
       const hint = choice.hint ? `  ${c.dim(ellipsize(choice.hint, budget))}` : "";
       return `${dot} ${label}${hint}`;
     },
-    footer: "↑/↓ navigate · enter to select · esc to cancel",
+    allowBack: opts.allowBack,
+    footer: opts.allowBack
+      ? "↑/↓ navigate · enter to select · ← back · esc to cancel"
+      : "↑/↓ navigate · enter to select · esc to cancel",
     onKey: (key, cursor) =>
       key.name === "return" ? { done: choices[cursor].value } : undefined,
     summaryFor: (value) =>
@@ -562,7 +626,9 @@ export function selectOne<T>(opts: SelectOneOptions<T>): Promise<T | null> {
 
 // ── multiSelect (checklist) ────────────────────────────────────────────────────
 
-export function multiSelect<T>(opts: MultiSelectOptions<T>): Promise<T[] | null> {
+export function multiSelect<T>(opts: MultiSelectOptions<T> & { allowBack: true }): Promise<T[] | null | Back>;
+export function multiSelect<T>(opts: MultiSelectOptions<T>): Promise<T[] | null>;
+export function multiSelect<T>(opts: MultiSelectOptions<T>): Promise<T[] | null | Back> {
   const stdin: TTYIn = opts.stdin ?? process.stdin;
   const stdout: TTYOut = opts.stdout ?? process.stdout;
   const choices = opts.choices;
@@ -604,7 +670,17 @@ export function multiSelect<T>(opts: MultiSelectOptions<T>): Promise<T[] | null>
       return `${caret} ${box} ${label}${hint}`;
     },
     warnLine: () => (warn ? c.warn(`Select at least ${minSelected}.`) : null),
-    footer: opts.hint ?? "↑/↓ move · space select · ctrl+a all · enter confirm",
+    allowBack: opts.allowBack,
+    // Reads the SAME `checked` array the prompt is driving, so what the caller
+    // learns is exactly what was on screen when ← was pressed.
+    onBack: opts.onBack
+      ? () => opts.onBack?.(choices.filter((_, i) => checked[i]).map((ch) => ch.value))
+      : undefined,
+    footer:
+      opts.hint ??
+      (opts.allowBack
+        ? "↑/↓ move · space select · ctrl+a all · ← back · enter confirm"
+        : "↑/↓ move · space select · ctrl+a all · enter confirm"),
     onKey: (key, cursor) => {
       if (key.name === "space") {
         if (choices[cursor]?.locked) return "redraw"; // always on — not a choice
@@ -641,5 +717,129 @@ export function multiSelect<T>(opts: MultiSelectOptions<T>): Promise<T[] | null>
               .map((ch) => ch.label),
             noun,
           ),
+  });
+}
+
+// ── promptText (single line, optionally masked) ───────────────────────────────
+
+export interface PromptTextOptions {
+  message: string;
+  /** Shown dimmed under the prompt. */
+  hint?: string;
+  /** Used when the user submits an empty line. */
+  defaultValue?: string;
+  /**
+   * Render `•` instead of the typed characters. For credentials: the wizard is
+   * routinely run while screen-sharing, and a pasted key would otherwise sit in
+   * the scrollback of every recording of that session.
+   */
+  mask?: boolean;
+  /** Return an error string to reject and re-ask, or null to accept. */
+  validate?: (value: string) => string | null;
+  stdin?: TTYIn;
+  stdout?: TTYOut;
+}
+
+/**
+ * Read one line. Resolves `null` on Ctrl-C / Escape, which every caller in the
+ * wizard treats as "cancel the whole run" — consistent with selectOne.
+ *
+ * Falls back to a plain non-TTY read so `failproofai config` still works when
+ * driven from a pipe or a test, the same way the other prompts do.
+ */
+export function promptText(opts: PromptTextOptions): Promise<string | null> {
+  const stdin: TTYIn = opts.stdin ?? process.stdin;
+  const stdout: TTYOut = opts.stdout ?? process.stdout;
+  const c = paint(colorsEnabled(stdout));
+
+  const accept = (raw: string): { ok: true; value: string } | { ok: false; error: string } => {
+    const value = raw.trim() || opts.defaultValue || "";
+    const error = opts.validate?.(value) ?? null;
+    return error ? { ok: false, error } : { ok: true, value };
+  };
+
+  if (!stdin.isTTY) {
+    // Non-TTY: read whatever is piped, validate once, no re-ask loop (there is
+    // no one to re-ask).
+    return new Promise((resolve) => {
+      let buf = "";
+      const onData = (chunk: Buffer | string) => {
+        buf += String(chunk);
+        if (buf.includes("\n")) done();
+      };
+      const done = () => {
+        stdin.removeListener("data", onData);
+        stdin.removeListener("end", done);
+        const r = accept(buf.split("\n")[0] ?? "");
+        resolve(r.ok ? r.value : null);
+      };
+      stdin.on("data", onData);
+      stdin.on("end", done);
+    });
+  }
+
+  return new Promise((resolve) => {
+    let value = "";
+    const draw = (error?: string) => {
+      const cols = stdout.columns || 80;
+      const shown = opts.mask ? "•".repeat(value.length) : value;
+      const hint = opts.hint ? `  ${c.dim(opts.hint)}` : "";
+      // Truncate to ONE physical row. `\r\x1b[2K` erases the row the cursor is
+      // on and nothing above it — so a line wider than the terminal wraps, the
+      // erase reaches only its last row, and every keystroke leaves the earlier
+      // rows behind. That is why pasting a 40-character API key printed 40
+      // stacked copies of the prompt: `API key for <host>` plus the masked
+      // value plus the `needs events:add · policies:pull …` hint is past 80
+      // columns before the key is even half typed.
+      const line = truncate(`${c.bold(opts.message)} ${shown}${hint}`, cols - 1);
+      const err = error ? `\n  ${truncate(c.warn(error), cols - 3)}` : "";
+      stdout.write(`\r\x1b[2K${line}${err}`);
+      if (err) stdout.write("\x1b[1A");
+    };
+    draw();
+
+    readline.emitKeypressEvents(stdin);
+    const wasRaw = stdin.isRaw;
+    stdin.setRawMode?.(true);
+    stdin.resume();
+
+    const cleanup = () => {
+      stdin.removeListener("keypress", onKey);
+      stdin.setRawMode?.(wasRaw ?? false);
+      stdin.pause();
+      stdout.write("\n");
+    };
+
+    function onKey(str: string | undefined, key: readline.Key): void {
+      if (!key) return;
+      if ((key.ctrl && (key.name === "c" || key.name === "d")) || key.name === "escape") {
+        cleanup();
+        resolve(null);
+        return;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        const r = accept(value);
+        if (r.ok) {
+          cleanup();
+          resolve(r.value);
+        } else {
+          draw(r.error);
+        }
+        return;
+      }
+      if (key.name === "backspace") {
+        value = value.slice(0, -1);
+        draw();
+        return;
+      }
+      // Ignore control keys; accept any printable character, including a
+      // bracketed paste arriving as one chunk.
+      if (str && !key.ctrl && !key.meta) {
+        value += str;
+        draw();
+      }
+    }
+
+    stdin.on("keypress", onKey);
   });
 }

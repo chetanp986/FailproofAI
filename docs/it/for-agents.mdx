@@ -1,6 +1,6 @@
 ---
-title: "Per agenti"
-description: "Aggiungi la conoscenza di Failproof AI al tuo agente di codifica in un comando. Funziona con Claude Code, Cursor, Windsurf e altri."
+title: "Per gli agenti"
+description: "Aggiungi la conoscenza di Failproof AI al tuo agente di codifica in un comando. Funziona con Claude Code, Cursor, Windsurf e molti altri."
 ---
 
 Aggiungi il riferimento completo di Failproof AI al tuo agente di codifica in un comando. Funziona con Claude Code, Cursor, Windsurf e qualsiasi altro agente che supporti le skill.
@@ -14,14 +14,14 @@ npx skills add https://docs.befailproof.ai
 ## Cosa copre la skill
 
 | Area | Cosa è incluso |
-|------|---|
-| Policies | Nomi delle policy integrate, tipi di evento, parametri, abilitazione/disabilitazione |
+|------|----------------|
+| Policies | Nomi policy built-in, tipi di evento, parametri, abilitazione/disabilitazione |
 | Custom policies | `customPolicies.add()`, filtri di corrispondenza, API `allow`/`deny`/`instruct` |
-| Context object | `ctx.eventType`, `ctx.toolName`, `ctx.toolInput`, `ctx.session` |
-| Configuration | struttura `policies-config.json`, fusione degli scope, `policyParams` |
+| Oggetto Context | `ctx.eventType`, `ctx.toolName`, `ctx.toolInput`, `ctx.session` |
+| Configurazione | Struttura `policies-config.json`, merging dei scope, `policyParams` |
 | CLI | `failproofai policies --install`, `--uninstall`, `--custom`, scope |
-| Dashboard | visualizzatore di sessioni, attività delle policy, variabili di ambiente |
-| Architecture | flusso del gestore hook, codici di uscita, contratto stdin/stdout |
+| Dashboard | Visualizzatore di sessioni, attività delle policy, variabili d'ambiente |
+| Architettura | Flusso del gestore hook, codici di uscita, contratto stdin/stdout |
 
 ## La skill è completa?
 
@@ -30,9 +30,9 @@ Mintlify genera `llms.txt` da tutte le pagine nella navigazione. La documentazio
 Per un contesto mirato, collega direttamente a una pagina specifica:
 
 ```bash
-# Solo l'API custom policies
+# Solo l'API delle custom policies
 npx skills add https://docs.befailproof.ai/custom-policies
 
-# Solo le policy integrate
+# Solo le policy built-in
 npx skills add https://docs.befailproof.ai/built-in-policies
 ```

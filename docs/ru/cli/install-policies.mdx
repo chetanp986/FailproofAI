@@ -1,33 +1,33 @@
 ---
 title: Установка политик
-description: "Включите политики, чтобы они выполнялись при каждом вызове инструмента агента"
+description: "Включите политики, чтобы они запускались при каждом вызове инструмента агента"
 ---
 
 ```bash
 failproofai policies --install [policy-names...] [options]
 ```
 
-Записывает записи hook в файл настроек установленного CLI агента (Claude Code, OpenAI Codex или GitHub Copilot CLI _(beta)_), чтобы failproofai перехватывал вызовы инструментов.
+Добавляет записи хуков в файл настроек установленного CLI агента (Claude Code, OpenAI Codex или GitHub Copilot CLI _(beta)_), чтобы failproofai перехватывал вызовы инструментов.
 
-Альтернативные команды: `failproofai p -i`
+Сокращения: `failproofai p -i`
 
 ## Опции
 
 | Флаг | Описание |
-|------|-------------|
-| `--cli claude\|codex\|copilot` | CLI агента(ов) для установки; разделённые пробелом (например `--cli claude codex copilot`) или повторённые. Если опущено, система автоматически обнаружит установленные CLI и запросит выбор. |
-| `--scope user` | Установить в пользовательский файл настроек (Claude: `~/.claude/settings.json`; Codex: `~/.codex/hooks.json`; Copilot: `~/.copilot/hooks/failproofai.json`). По умолчанию. |
+|------|---------|
+| `--cli claude\|codex\|copilot` | CLI агента(ов) для установки; через пробел (например `--cli claude codex copilot`) или повторно. Пропустите, чтобы автоматически определить установленные CLI и выбрать. |
+| `--scope user` | Установить в файл настроек пользователя (Claude: `~/.claude/settings.json`; Codex: `~/.codex/hooks.json`; Copilot: `~/.copilot/hooks/failproofai.json`). По умолчанию. |
 | `--scope project` | Установить в файл настроек проекта (Claude: `<cwd>/.claude/settings.json`; Codex: `<cwd>/.codex/hooks.json`; Copilot: `<cwd>/.github/hooks/failproofai.json`). |
-| `--scope local` | Только для Claude — установить в `<cwd>/.claude/settings.local.json`. Codex и Copilot не поддерживают область `local`. |
-| `--custom <path>` / `-c` | Путь к файлу JS, содержащему пользовательские политики hook |
+| `--scope local` | Только Claude — установить в `<cwd>/.claude/settings.local.json`. Codex и Copilot не имеют области `local`. |
+| `--custom <path>` / `-c` | Путь к файлу JS с пользовательскими политиками хуков |
 
 ## Поведение
 
-- **Без названий политик** — открывает интерактивное окно для выбора политик
-- **Конкретные названия** — включает эти политики (добавляет их к уже включённым)
-- **`all`** — включает все доступные политики
+- **Без имён политик** - открывает интерактивное меню для выбора политик
+- **Конкретные имена** - включает эти политики (добавляет к уже включённым)
+- **`all`** - включает все доступные политики
 
-Установка носит аддитивный характер: повторный запуск `--install` добавляет новые политики без удаления существующих.
+Установка является аддитивной: повторный запуск `--install` добавит новые политики без удаления существующих.
 
 ## Примеры
 
@@ -54,4 +54,4 @@ failproofai policies --install --cli copilot --scope project
 failproofai policies --install --cli claude codex copilot
 ```
 
-Если указан параметр `--custom <path>`, файл немедленно проверяется — он должен хотя бы один раз вызвать `customPolicies.add()`. Разрешённый путь сохраняется в `policies-config.json` как `customPoliciesPath`.
+Когда указана опция `--custom <path>`, файл немедленно проверяется — он должен вызвать `customPolicies.add()` хотя бы один раз. Разрешённый путь сохраняется в `policies-config.json` как `customPoliciesPath`.

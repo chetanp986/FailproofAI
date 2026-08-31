@@ -5,10 +5,8 @@
  * fire at the trigger site. Keep one focused case per event.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
-import { resolve } from "node:path";
-import { homedir } from "node:os";
 
 vi.mock("node:fs", () => ({
   readFileSync: vi.fn(),
@@ -50,11 +48,21 @@ vi.mock("../../src/hooks/integrations", () => ({
     hooksInstalledInSettings: vi.fn(() => false),
   },
   listIntegrations: vi.fn(() => []),
+  // Mirrors the real helper: one path per integration unless it opts into
+  // multiple (Hermes, one config.yaml per profile).
+  settingsPathsFor: vi.fn(
+    (integration: { getSettingsPaths?: (s: string, c?: string) => string[]; getSettingsPath: (s: string, c?: string) => string }, scope: string, cwd?: string) => {
+      const paths = integration.getSettingsPaths?.(scope, cwd);
+      return paths && paths.length > 0 ? paths : [integration.getSettingsPath(scope, cwd)];
+    },
+  ),
 }));
 
 vi.mock("../../src/hooks/hooks-config", () => ({
   readHooksConfig: vi.fn(() => ({ enabledPolicies: [] })),
   readMergedHooksConfig: vi.fn(() => ({ enabledPolicies: [] })),
+  configuredCustomPolicyPaths: vi.fn((config: { customPoliciesPaths?: string[]; customPoliciesPath?: string }) =>
+    config.customPoliciesPaths ?? (config.customPoliciesPath ? [config.customPoliciesPath] : [])),
   writeHooksConfig: vi.fn(),
   readScopedHooksConfig: vi.fn(() => ({ enabledPolicies: [] })),
   writeScopedHooksConfig: vi.fn(),
